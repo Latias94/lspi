@@ -108,4 +108,7 @@ Generate a starter config:
 
 ```bash
 lspi setup --workspace-root /path/to/project --write
+
+# Best-effort detection (Rust/C#) and tailored config:
+lspi setup --workspace-root /path/to/project --wizard --write
 ```
