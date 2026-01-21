@@ -82,6 +82,7 @@ Notes:
 
 - Codex uses a global config; run `codex` from the project root you want to work on.
 - You can pass `--config /path/to/lspi.toml` in `args` if you keep config outside the workspace.
+- Optional: add `--warmup` to start language servers eagerly (reduces first-tool-call latency).
 
 ## Configuration
 
@@ -114,7 +115,7 @@ Common environment variables:
 - `find_references`, `find_references_at`
 - `rename_symbol`, `rename_symbol_strict`
 - `get_diagnostics`
-- `restart_server`
+- `restart_server`, `stop_server`
 
 ## Development
 

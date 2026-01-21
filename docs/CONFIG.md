@@ -31,6 +31,8 @@ extensions = ["rs"]                # required (no leading dots)
 initialize_timeout_ms = 10000      # optional
 request_timeout_ms = 30000         # optional
 warmup_timeout_ms = 5000           # optional
+# restart_interval_minutes = 30    # optional; auto-restart long-running servers
+# idle_shutdown_ms = 300000        # optional; auto-stop after being idle
 ```
 
 Routing semantics (ADR 0006):
@@ -60,12 +62,21 @@ args = ["-lsp"]
 initialize_timeout_ms = 10000
 request_timeout_ms = 30000
 warmup_timeout_ms = 0
+# restart_interval_minutes = 30
+# idle_shutdown_ms = 300000
 ```
 
 If `command` is not set for an `omnisharp` server, `lspi` tries:
 
 - `LSPI_OMNISHARP_COMMAND`
 - `omnisharp` from `PATH`
+
+### Lifecycle options (optional)
+
+These options control how `lspi` manages long-running language server processes:
+
+- `restart_interval_minutes`: if set, `lspi` may restart the server after it has been running for this long (best-effort).
+- `idle_shutdown_ms`: if set, `lspi` may stop the server after it has been idle for this long (best-effort).
 
 ### `mcp.output` (optional)
 

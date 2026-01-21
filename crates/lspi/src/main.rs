@@ -34,6 +34,9 @@ enum Command {
         /// Override workspace root (defaults to config or current directory)
         #[arg(long)]
         workspace_root: Option<PathBuf>,
+        /// Start language servers eagerly (reduces first-tool-call latency)
+        #[arg(long)]
+        warmup: bool,
     },
     /// Print environment/config diagnostics for lspi
     Doctor {
@@ -81,10 +84,12 @@ async fn main() -> Result<()> {
         Command::Mcp {
             config,
             workspace_root,
+            warmup,
         } => {
             lspi_mcp::run_stdio_with_options(lspi_mcp::McpOptions {
                 config_path: config,
                 workspace_root,
+                warmup,
             })
             .await
         }
@@ -364,6 +369,8 @@ extensions = ["rs"]
 initialize_timeout_ms = 10000
 request_timeout_ms = 30000
 warmup_timeout_ms = 5000
+# restart_interval_minutes = 30
+# idle_shutdown_ms = 300000
 
 ## C# (OmniSharp) example:
 # [[servers]]
@@ -376,6 +383,8 @@ warmup_timeout_ms = 5000
 # initialize_timeout_ms = 10000
 # request_timeout_ms = 30000
 # warmup_timeout_ms = 0
+# # restart_interval_minutes = 30
+# # idle_shutdown_ms = 300000
 "#
     .trim()
     .to_string()

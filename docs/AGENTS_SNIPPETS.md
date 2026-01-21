@@ -20,7 +20,7 @@ This document provides copy-paste prompt snippets you can add to your project's 
   - `find_references`, `find_references_at`
   - `rename_symbol`, `rename_symbol_strict`
   - `get_diagnostics`
-  - `restart_server` (if the language server is stuck)
+  - `restart_server` / `stop_server` (if the language server is stuck or you need to release resources)
 - Strategy:
   - Prefer small, precise operations and verify with references/diagnostics.
   - Avoid large multi-file rewrites unless required.
@@ -41,7 +41,6 @@ You can paste the following into your project's `AGENTS.md`:
   - find_references / find_references_at
   - rename_symbol / rename_symbol_strict
   - get_diagnostics
-  - restart_server
+  - restart_server / stop_server
 - 使用策略：优先小范围、精准操作；先验证再改动；输出需带文件/符号/位置与变更原因，便于追溯。
 ```
-

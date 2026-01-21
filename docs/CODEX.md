@@ -32,6 +32,7 @@ Notes:
 
 - `--workspace-root "."` means “use the current working directory”.
 - Because Codex uses a global config, you should run `codex` from the project root you want to work on.
+- Optional: add `--warmup` to reduce first-tool-call latency by starting language servers eagerly.
 
 ## Recommended: Generate a project config
 

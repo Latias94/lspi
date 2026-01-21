@@ -2,8 +2,9 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rmcp::ErrorData as McpError;
 use rmcp::ServiceExt;
 use rmcp::handler::server::ServerHandler;
@@ -19,7 +20,7 @@ use rmcp::model::Tool;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
-use tracing::warn;
+use tracing::{info, warn};
 use url::Url;
 
 const DEFAULT_MAX_TOTAL_CHARS: usize = 120_000;
@@ -27,22 +28,18 @@ const MIN_MAX_TOTAL_CHARS: usize = 10_000;
 const ABS_MAX_TOTAL_CHARS: usize = 2_000_000;
 
 pub async fn run_stdio() -> Result<()> {
-    let service = LspiMcpServer::new(McpOptions::default())?;
-    let running = service
-        .serve((tokio::io::stdin(), tokio::io::stdout()))
-        .await?;
-    running.waiting().await?;
-    Ok(())
+    run_stdio_with_options(McpOptions::default()).await
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct McpOptions {
     pub config_path: Option<PathBuf>,
     pub workspace_root: Option<PathBuf>,
+    pub warmup: bool,
 }
 
 pub async fn run_stdio_with_options(options: McpOptions) -> Result<()> {
-    let service = LspiMcpServer::new(options)?;
+    let service = LspiMcpServer::new(options).await?;
     let running = service
         .serve((tokio::io::stdin(), tokio::io::stdout()))
         .await?;
@@ -57,14 +54,14 @@ struct LspiMcpServer {
 }
 
 impl LspiMcpServer {
-    fn new(options: McpOptions) -> Result<Self> {
+    async fn new(options: McpOptions) -> Result<Self> {
         let loaded = lspi_core::config::load_config(
             options.config_path.as_deref(),
             options.workspace_root.as_deref(),
         )?;
         let servers = lspi_core::config::resolved_servers(&loaded.config, &loaded.workspace_root);
 
-        Ok(Self {
+        let server = Self {
             tools: Arc::new(vec![
                 tool_find_definition(),
                 tool_find_definition_at(),
@@ -74,6 +71,7 @@ impl LspiMcpServer {
                 tool_rename_symbol_strict(),
                 tool_get_diagnostics(),
                 tool_restart_server(),
+                tool_stop_server(),
             ]),
             state: Arc::new(LspiState {
                 workspace_root: loaded.workspace_root,
@@ -82,7 +80,138 @@ impl LspiMcpServer {
                 rust_analyzer: Mutex::new(HashMap::new()),
                 omnisharp: Mutex::new(HashMap::new()),
             }),
-        })
+        };
+
+        if options.warmup {
+            server.warmup_servers().await?;
+        }
+
+        server.start_idle_reaper_if_configured();
+
+        Ok(server)
+    }
+
+    async fn warmup_servers(&self) -> Result<()> {
+        for server in &self.state.servers {
+            let kind = server.kind.trim().to_ascii_lowercase().replace('-', "_");
+            if kind == "rust_analyzer" || kind == "rust" {
+                info!(
+                    "warmup: starting rust-analyzer server_id={} root_dir={}",
+                    server.id,
+                    server.root_dir.display()
+                );
+                let client = self
+                    .rust_analyzer_for_server(server)
+                    .await
+                    .map_err(|e| anyhow!(e.to_string()))?;
+                let _ = client.wait_quiescent().await;
+                continue;
+            }
+
+            if kind == "omnisharp" || kind == "csharp" {
+                info!(
+                    "warmup: starting omnisharp server_id={} root_dir={}",
+                    server.id,
+                    server.root_dir.display()
+                );
+                let _ = self
+                    .omnisharp_for_server(server)
+                    .await
+                    .map_err(|e| anyhow!(e.to_string()))?;
+                if let Some(ms) = server.warmup_timeout_ms.filter(|ms| *ms > 0) {
+                    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                }
+                continue;
+            }
+
+            info!(
+                "warmup: skipping unsupported server kind={} id={}",
+                server.kind, server.id
+            );
+        }
+        Ok(())
+    }
+
+    fn start_idle_reaper_if_configured(&self) {
+        let mut idle_policies = HashMap::<String, (String, Duration)>::new();
+        for s in &self.state.servers {
+            let Some(ms) = s.idle_shutdown_ms.filter(|ms| *ms > 0) else {
+                continue;
+            };
+            idle_policies.insert(s.id.clone(), (s.kind.clone(), Duration::from_millis(ms)));
+        }
+
+        if idle_policies.is_empty() {
+            return;
+        }
+
+        let state = self.state.clone();
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+
+                let now = Instant::now();
+                let mut to_shutdown_ra: Vec<(String, ManagedClient<lspi_lsp::RustAnalyzerClient>)> =
+                    Vec::new();
+                let mut to_shutdown_os: Vec<(String, ManagedClient<lspi_lsp::OmniSharpClient>)> =
+                    Vec::new();
+
+                for (id, (kind, idle)) in idle_policies.iter() {
+                    if is_rust_analyzer_kind(kind) {
+                        let removed = {
+                            let mut guard = state.rust_analyzer.lock().await;
+                            if let Some(entry) = guard.get(id) {
+                                if now.duration_since(entry.last_used) >= *idle {
+                                    guard.remove(id).map(|e| (id.clone(), e))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some(r) = removed {
+                            to_shutdown_ra.push(r);
+                        }
+                        continue;
+                    }
+
+                    if is_omnisharp_kind(kind) {
+                        let removed = {
+                            let mut guard = state.omnisharp.lock().await;
+                            if let Some(entry) = guard.get(id) {
+                                if now.duration_since(entry.last_used) >= *idle {
+                                    guard.remove(id).map(|e| (id.clone(), e))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some(r) = removed {
+                            to_shutdown_os.push(r);
+                        }
+                        continue;
+                    }
+                }
+
+                for (id, entry) in to_shutdown_ra {
+                    if let Err(entry) = shutdown_rust_analyzer_managed(entry).await {
+                        let mut guard = state.rust_analyzer.lock().await;
+                        guard.insert(id, entry);
+                    }
+                }
+
+                for (id, entry) in to_shutdown_os {
+                    if let Err(entry) = shutdown_omnisharp_managed(entry).await {
+                        let mut guard = state.omnisharp.lock().await;
+                        guard.insert(id, entry);
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -126,6 +255,7 @@ impl ServerHandler for LspiMcpServer {
             "rename_symbol" => self.rename_symbol(request).await,
             "rename_symbol_strict" => self.rename_symbol_strict(request).await,
             "restart_server" => self.restart_server(request).await,
+            "stop_server" => self.stop_server(request).await,
             other => Ok(CallToolResult {
                 content: vec![Content::text(format!(
                     "Tool '{other}' is not implemented yet."
@@ -142,12 +272,29 @@ impl ServerHandler for LspiMcpServer {
     }
 }
 
+struct ManagedClient<T> {
+    client: Arc<T>,
+    started_at: Instant,
+    last_used: Instant,
+}
+
+impl<T> ManagedClient<T> {
+    fn new(client: Arc<T>) -> Self {
+        let now = Instant::now();
+        Self {
+            client,
+            started_at: now,
+            last_used: now,
+        }
+    }
+}
+
 struct LspiState {
     workspace_root: PathBuf,
     config: lspi_core::config::LspiConfig,
     servers: Vec<lspi_core::config::ResolvedServerConfig>,
-    rust_analyzer: Mutex<HashMap<String, Arc<lspi_lsp::RustAnalyzerClient>>>,
-    omnisharp: Mutex<HashMap<String, Arc<lspi_lsp::OmniSharpClient>>>,
+    rust_analyzer: Mutex<HashMap<String, ManagedClient<lspi_lsp::RustAnalyzerClient>>>,
+    omnisharp: Mutex<HashMap<String, ManagedClient<lspi_lsp::OmniSharpClient>>>,
 }
 
 fn lsp_position_1based(pos: &lspi_lsp::LspPosition) -> Value {
@@ -320,6 +467,12 @@ struct RenameSymbolStrictArgs {
 
 #[derive(Debug, Deserialize)]
 struct RestartServerArgs {
+    #[serde(default)]
+    extensions: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StopServerArgs {
     #[serde(default)]
     extensions: Option<Vec<String>>,
 }
@@ -556,12 +709,35 @@ impl LspiMcpServer {
         &self,
         server: &lspi_core::config::ResolvedServerConfig,
     ) -> Result<Arc<lspi_lsp::RustAnalyzerClient>, McpError> {
-        let existing = {
-            let guard = self.state.rust_analyzer.lock().await;
-            guard.get(&server.id).cloned()
+        let now = Instant::now();
+
+        // Fast path: reuse running server unless restart policy triggers.
+        let restart_old = {
+            let mut guard = self.state.rust_analyzer.lock().await;
+            if let Some(entry) = guard.get_mut(&server.id) {
+                if should_restart(now, entry.started_at, server.restart_interval_minutes) {
+                    guard.remove(&server.id)
+                } else {
+                    entry.last_used = now;
+                    return Ok(entry.client.clone());
+                }
+            } else {
+                None
+            }
         };
-        if let Some(existing) = existing {
-            return Ok(existing);
+
+        if let Some(old) = restart_old {
+            match shutdown_rust_analyzer_managed(old).await {
+                Ok(()) => {}
+                Err(mut old) => {
+                    // Server is busy; keep the existing instance to avoid leaking a subprocess.
+                    old.last_used = now;
+                    let client = old.client.clone();
+                    let mut guard = self.state.rust_analyzer.lock().await;
+                    guard.insert(server.id.clone(), old);
+                    return Ok(client);
+                }
+            }
         }
 
         let command = match server.command.as_deref() {
@@ -599,23 +775,21 @@ impl LspiMcpServer {
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         let arc = Arc::new(client);
+        let managed = ManagedClient::new(arc.clone());
 
         let inserted = {
             let mut guard = self.state.rust_analyzer.lock().await;
-            if let Some(existing) = guard.get(&server.id) {
-                Some(existing.clone())
+            if let Some(existing) = guard.get_mut(&server.id) {
+                existing.last_used = now;
+                Some(existing.client.clone())
             } else {
-                guard.insert(server.id.clone(), arc.clone());
+                guard.insert(server.id.clone(), managed);
                 None
             }
         };
 
         if let Some(existing) = inserted {
-            if Arc::strong_count(&arc) == 1
-                && let Ok(client) = Arc::try_unwrap(arc)
-            {
-                let _ = client.shutdown().await;
-            }
+            let _ = shutdown_rust_analyzer_arc(arc).await;
             return Ok(existing);
         }
 
@@ -626,12 +800,33 @@ impl LspiMcpServer {
         &self,
         server: &lspi_core::config::ResolvedServerConfig,
     ) -> Result<Arc<lspi_lsp::OmniSharpClient>, McpError> {
-        let existing = {
-            let guard = self.state.omnisharp.lock().await;
-            guard.get(&server.id).cloned()
+        let now = Instant::now();
+
+        let restart_old = {
+            let mut guard = self.state.omnisharp.lock().await;
+            if let Some(entry) = guard.get_mut(&server.id) {
+                if should_restart(now, entry.started_at, server.restart_interval_minutes) {
+                    guard.remove(&server.id)
+                } else {
+                    entry.last_used = now;
+                    return Ok(entry.client.clone());
+                }
+            } else {
+                None
+            }
         };
-        if let Some(existing) = existing {
-            return Ok(existing);
+
+        if let Some(old) = restart_old {
+            match shutdown_omnisharp_managed(old).await {
+                Ok(()) => {}
+                Err(mut old) => {
+                    old.last_used = now;
+                    let client = old.client.clone();
+                    let mut guard = self.state.omnisharp.lock().await;
+                    guard.insert(server.id.clone(), old);
+                    return Ok(client);
+                }
+            }
         }
 
         let command = match server.command.as_deref() {
@@ -679,23 +874,21 @@ impl LspiMcpServer {
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         let arc = Arc::new(client);
+        let managed = ManagedClient::new(arc.clone());
 
         let inserted = {
             let mut guard = self.state.omnisharp.lock().await;
-            if let Some(existing) = guard.get(&server.id) {
-                Some(existing.clone())
+            if let Some(existing) = guard.get_mut(&server.id) {
+                existing.last_used = now;
+                Some(existing.client.clone())
             } else {
-                guard.insert(server.id.clone(), arc.clone());
+                guard.insert(server.id.clone(), managed);
                 None
             }
         };
 
         if let Some(existing) = inserted {
-            if Arc::strong_count(&arc) == 1
-                && let Ok(client) = Arc::try_unwrap(arc)
-            {
-                let _ = client.shutdown().await;
-            }
+            let _ = shutdown_omnisharp_arc(arc).await;
             return Ok(existing);
         }
 
@@ -1905,12 +2098,12 @@ impl LspiMcpServer {
             let kind = kind_by_id.get(&id).cloned().unwrap_or_default();
 
             if is_rust_analyzer_kind(&kind) {
-                let ra_arc = {
+                let ra_entry = {
                     let mut guard = self.state.rust_analyzer.lock().await;
                     guard.remove(&id)
                 };
 
-                let Some(ra_arc) = ra_arc else {
+                let Some(ra_entry) = ra_entry else {
                     warnings.push(json!({
                         "kind": "server_not_running",
                         "server_id": id,
@@ -1919,21 +2112,11 @@ impl LspiMcpServer {
                     continue;
                 };
 
-                if Arc::strong_count(&ra_arc) > 1 {
-                    let mut guard = self.state.rust_analyzer.lock().await;
-                    guard.insert(id.clone(), ra_arc);
-                    busy.push(id);
-                    continue;
-                }
-
-                match Arc::try_unwrap(ra_arc) {
-                    Ok(client) => {
-                        let _ = client.shutdown().await;
-                        restarted.push(id);
-                    }
-                    Err(arc) => {
+                match shutdown_rust_analyzer_managed(ra_entry).await {
+                    Ok(()) => restarted.push(id),
+                    Err(entry) => {
                         let mut guard = self.state.rust_analyzer.lock().await;
-                        guard.insert(id.clone(), arc);
+                        guard.insert(id.clone(), entry);
                         busy.push(id);
                     }
                 }
@@ -1941,12 +2124,12 @@ impl LspiMcpServer {
             }
 
             if is_omnisharp_kind(&kind) {
-                let os_arc = {
+                let os_entry = {
                     let mut guard = self.state.omnisharp.lock().await;
                     guard.remove(&id)
                 };
 
-                let Some(os_arc) = os_arc else {
+                let Some(os_entry) = os_entry else {
                     warnings.push(json!({
                         "kind": "server_not_running",
                         "server_id": id,
@@ -1955,21 +2138,11 @@ impl LspiMcpServer {
                     continue;
                 };
 
-                if Arc::strong_count(&os_arc) > 1 {
-                    let mut guard = self.state.omnisharp.lock().await;
-                    guard.insert(id.clone(), os_arc);
-                    busy.push(id);
-                    continue;
-                }
-
-                match Arc::try_unwrap(os_arc) {
-                    Ok(client) => {
-                        let _ = client.shutdown().await;
-                        restarted.push(id);
-                    }
-                    Err(arc) => {
+                match shutdown_omnisharp_managed(os_entry).await {
+                    Ok(()) => restarted.push(id),
+                    Err(entry) => {
                         let mut guard = self.state.omnisharp.lock().await;
-                        guard.insert(id.clone(), arc);
+                        guard.insert(id.clone(), entry);
                         busy.push(id);
                     }
                 }
@@ -2009,6 +2182,154 @@ impl LspiMcpServer {
             meta: None,
         })
     }
+
+    async fn stop_server(&self, request: CallToolRequestParam) -> Result<CallToolResult, McpError> {
+        let args: StopServerArgs = match request.arguments {
+            Some(arguments) => parse_arguments(Some(arguments))?,
+            None => StopServerArgs { extensions: None },
+        };
+
+        let requested_extensions: Vec<String> = args
+            .extensions
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|e| {
+                let e = e.trim().trim_start_matches('.').to_ascii_lowercase();
+                if e.is_empty() { None } else { Some(e) }
+            })
+            .collect();
+
+        let target_server_ids: Vec<String> =
+            if args.extensions.is_none() || requested_extensions.is_empty() {
+                self.state.servers.iter().map(|s| s.id.clone()).collect()
+            } else {
+                self.state
+                    .servers
+                    .iter()
+                    .filter(|s| {
+                        s.extensions
+                            .iter()
+                            .any(|e| requested_extensions.iter().any(|want| want == e))
+                    })
+                    .map(|s| s.id.clone())
+                    .collect()
+            };
+
+        if target_server_ids.is_empty() {
+            return Ok(CallToolResult {
+                content: vec![Content::text("No matching servers to stop.")],
+                structured_content: Some(json!({
+                    "ok": true,
+                    "tool": "stop_server",
+                    "requested_extensions": requested_extensions,
+                    "stopped": [],
+                    "warnings": []
+                })),
+                is_error: Some(false),
+                meta: None,
+            });
+        }
+
+        let mut stopped = Vec::new();
+        let mut warnings = Vec::<Value>::new();
+        let mut busy = Vec::<String>::new();
+
+        let kind_by_id: std::collections::HashMap<String, String> = self
+            .state
+            .servers
+            .iter()
+            .map(|s| (s.id.clone(), s.kind.clone()))
+            .collect();
+
+        for id in target_server_ids {
+            let kind = kind_by_id.get(&id).cloned().unwrap_or_default();
+
+            if is_rust_analyzer_kind(&kind) {
+                let entry = {
+                    let mut guard = self.state.rust_analyzer.lock().await;
+                    guard.remove(&id)
+                };
+
+                let Some(entry) = entry else {
+                    warnings.push(json!({
+                        "kind": "server_not_running",
+                        "server_id": id,
+                        "message": "server is not running"
+                    }));
+                    continue;
+                };
+
+                match shutdown_rust_analyzer_managed(entry).await {
+                    Ok(()) => stopped.push(id),
+                    Err(entry) => {
+                        let mut guard = self.state.rust_analyzer.lock().await;
+                        guard.insert(id.clone(), entry);
+                        busy.push(id);
+                    }
+                }
+                continue;
+            }
+
+            if is_omnisharp_kind(&kind) {
+                let entry = {
+                    let mut guard = self.state.omnisharp.lock().await;
+                    guard.remove(&id)
+                };
+
+                let Some(entry) = entry else {
+                    warnings.push(json!({
+                        "kind": "server_not_running",
+                        "server_id": id,
+                        "message": "server is not running"
+                    }));
+                    continue;
+                };
+
+                match shutdown_omnisharp_managed(entry).await {
+                    Ok(()) => stopped.push(id),
+                    Err(entry) => {
+                        let mut guard = self.state.omnisharp.lock().await;
+                        guard.insert(id.clone(), entry);
+                        busy.push(id);
+                    }
+                }
+                continue;
+            }
+
+            warnings.push(json!({
+                "kind": "server_unsupported",
+                "server_id": id,
+                "server_kind": kind,
+                "message": "server kind is not supported yet"
+            }));
+        }
+
+        for id in &busy {
+            warnings.push(json!({
+                "kind": "server_busy",
+                "server_id": id,
+                "message": "server is currently in use; cannot stop safely"
+            }));
+        }
+
+        let ok = busy.is_empty();
+        let is_error = stopped.is_empty() && !busy.is_empty();
+
+        Ok(CallToolResult {
+            content: vec![Content::text("Stopped servers.")],
+            structured_content: Some(json!({
+                "ok": ok,
+                "tool": "stop_server",
+                "requested_extensions": requested_extensions,
+                "stopped": stopped,
+                "busy": busy,
+                "warnings": warnings
+            })),
+            is_error: Some(is_error),
+            meta: None,
+        })
+    }
 }
 
 fn is_rust_analyzer_kind(kind: &str) -> bool {
@@ -2019,6 +2340,101 @@ fn is_rust_analyzer_kind(kind: &str) -> bool {
 fn is_omnisharp_kind(kind: &str) -> bool {
     let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
     normalized == "omnisharp" || normalized == "csharp"
+}
+
+fn should_restart(
+    now: Instant,
+    started_at: Instant,
+    restart_interval_minutes: Option<u64>,
+) -> bool {
+    let Some(minutes) = restart_interval_minutes.filter(|m| *m > 0) else {
+        return false;
+    };
+    now.duration_since(started_at) >= Duration::from_secs(minutes.saturating_mul(60))
+}
+
+async fn shutdown_rust_analyzer_arc(
+    mut arc: Arc<lspi_lsp::RustAnalyzerClient>,
+) -> Result<(), Arc<lspi_lsp::RustAnalyzerClient>> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if Arc::strong_count(&arc) == 1 {
+            match Arc::try_unwrap(arc) {
+                Ok(client) => {
+                    let _ = client.shutdown().await;
+                    return Ok(());
+                }
+                Err(a) => arc = a,
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Err(arc);
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn shutdown_omnisharp_arc(
+    mut arc: Arc<lspi_lsp::OmniSharpClient>,
+) -> Result<(), Arc<lspi_lsp::OmniSharpClient>> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if Arc::strong_count(&arc) == 1 {
+            match Arc::try_unwrap(arc) {
+                Ok(client) => {
+                    let _ = client.shutdown().await;
+                    return Ok(());
+                }
+                Err(a) => arc = a,
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Err(arc);
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn shutdown_rust_analyzer_managed(
+    entry: ManagedClient<lspi_lsp::RustAnalyzerClient>,
+) -> Result<(), ManagedClient<lspi_lsp::RustAnalyzerClient>> {
+    let ManagedClient {
+        client,
+        started_at,
+        last_used,
+    } = entry;
+
+    match shutdown_rust_analyzer_arc(client).await {
+        Ok(()) => Ok(()),
+        Err(client) => Err(ManagedClient {
+            client,
+            started_at,
+            last_used,
+        }),
+    }
+}
+
+async fn shutdown_omnisharp_managed(
+    entry: ManagedClient<lspi_lsp::OmniSharpClient>,
+) -> Result<(), ManagedClient<lspi_lsp::OmniSharpClient>> {
+    let ManagedClient {
+        client,
+        started_at,
+        last_used,
+    } = entry;
+
+    match shutdown_omnisharp_arc(client).await {
+        Ok(()) => Ok(()),
+        Err(client) => Err(ManagedClient {
+            client,
+            started_at,
+            last_used,
+        }),
+    }
 }
 
 #[derive(Debug, Deserialize, serde::Serialize)]
@@ -2917,6 +3333,23 @@ fn tool_restart_server() -> Tool {
     Tool::new(
         Cow::Borrowed("restart_server"),
         Cow::Borrowed("Restart language servers (all or by file extensions)."),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "extensions": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                }
+            },
+            "additionalProperties": false
+        }))),
+    )
+}
+
+fn tool_stop_server() -> Tool {
+    Tool::new(
+        Cow::Borrowed("stop_server"),
+        Cow::Borrowed("Stop language servers (all or by file extensions)."),
         Arc::new(schema(json!({
             "type": "object",
             "properties": {

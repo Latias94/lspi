@@ -43,6 +43,12 @@ pub struct LspServerConfig {
     pub request_timeout_ms: Option<u64>,
     #[serde(default)]
     pub warmup_timeout_ms: Option<u64>,
+    /// Optional interval (minutes) to auto-restart long-running servers (helps stability for some LSPs).
+    #[serde(default)]
+    pub restart_interval_minutes: Option<u64>,
+    /// Optional idle shutdown (milliseconds). If set, lspi may stop the server after being idle.
+    #[serde(default)]
+    pub idle_shutdown_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +93,8 @@ pub struct ResolvedServerConfig {
     pub initialize_timeout_ms: Option<u64>,
     pub request_timeout_ms: Option<u64>,
     pub warmup_timeout_ms: Option<u64>,
+    pub restart_interval_minutes: Option<u64>,
+    pub idle_shutdown_ms: Option<u64>,
 }
 
 pub fn load_config(
@@ -284,6 +292,8 @@ fn resolve_server_config(
         initialize_timeout_ms: server.initialize_timeout_ms,
         request_timeout_ms: server.request_timeout_ms,
         warmup_timeout_ms: server.warmup_timeout_ms,
+        restart_interval_minutes: server.restart_interval_minutes,
+        idle_shutdown_ms: server.idle_shutdown_ms,
     }
 }
 
@@ -298,6 +308,8 @@ fn default_rust_analyzer_server(workspace_root: &Path) -> ResolvedServerConfig {
         initialize_timeout_ms: None,
         request_timeout_ms: None,
         warmup_timeout_ms: None,
+        restart_interval_minutes: None,
+        idle_shutdown_ms: None,
     }
 }
 
@@ -417,6 +429,8 @@ root_dir = "crates"
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 warmup_timeout_ms: None,
+                restart_interval_minutes: None,
+                idle_shutdown_ms: None,
             },
             ResolvedServerConfig {
                 id: "nested".to_string(),
@@ -428,6 +442,8 @@ root_dir = "crates"
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 warmup_timeout_ms: None,
+                restart_interval_minutes: None,
+                idle_shutdown_ms: None,
             },
         ];
 
@@ -456,6 +472,8 @@ root_dir = "crates"
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 warmup_timeout_ms: None,
+                restart_interval_minutes: None,
+                idle_shutdown_ms: None,
             },
             ResolvedServerConfig {
                 id: "second".to_string(),
@@ -467,6 +485,8 @@ root_dir = "crates"
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 warmup_timeout_ms: None,
+                restart_interval_minutes: None,
+                idle_shutdown_ms: None,
             },
         ];
 
