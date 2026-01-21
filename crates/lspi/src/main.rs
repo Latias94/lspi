@@ -116,6 +116,7 @@ async fn main() -> Result<()> {
                 println!("mcp.output: <not configured>");
             }
 
+            let mut failures = Vec::<String>::new();
             for s in servers {
                 if !is_rust_analyzer_kind(&s.kind) {
                     if is_omnisharp_kind(&s.kind) {
@@ -128,7 +129,23 @@ async fn main() -> Result<()> {
                             "server_preflight: id={} kind={} command={}",
                             s.id, s.kind, command
                         );
-                        lspi_lsp::preflight_omnisharp(&command).await?;
+
+                        if let Err(err) = lspi_lsp::preflight_omnisharp(&command).await {
+                            eprintln!("doctor_error: id={} kind={} error={:#}", s.id, s.kind, err);
+                            eprintln!(
+                                "doctor_hint: Install OmniSharp and ensure `omnisharp` is on PATH, or set LSPI_OMNISHARP_COMMAND."
+                            );
+                            eprintln!(
+                                "doctor_hint: On Windows, OmniSharp often ships with editor extensions (e.g. VS Code C#). You may need to expose the OmniSharp binary as `omnisharp`."
+                            );
+                            eprintln!(
+                                "doctor_hint: Also ensure `dotnet` is installed (OmniSharp depends on a .NET runtime/SDK)."
+                            );
+                            eprintln!("doctor_hint: Check: `dotnet --info`");
+                            failures
+                                .push(format!("omnisharp preflight failed for server id={}", s.id));
+                            continue;
+                        }
 
                         let output = TokioCommand::new(&command).arg("--version").output().await;
                         if let Ok(output) = output {
@@ -143,6 +160,17 @@ async fn main() -> Result<()> {
                             }
                         } else {
                             println!("server_version: id={} <unknown>", s.id);
+                        }
+
+                        let dotnet_ok = TokioCommand::new("dotnet")
+                            .arg("--info")
+                            .output()
+                            .await
+                            .is_ok();
+                        if !dotnet_ok {
+                            eprintln!(
+                                "doctor_hint: `dotnet` was not found. Install .NET SDK and retry."
+                            );
                         }
 
                         continue;
@@ -164,7 +192,17 @@ async fn main() -> Result<()> {
                     "server_preflight: id={} kind={} command={}",
                     s.id, s.kind, command
                 );
-                lspi_lsp::preflight_rust_analyzer(&command).await?;
+                if let Err(err) = lspi_lsp::preflight_rust_analyzer(&command).await {
+                    eprintln!("doctor_error: id={} kind={} error={:#}", s.id, s.kind, err);
+                    eprintln!(
+                        "doctor_hint: Install rust-analyzer via `rustup component add rust-analyzer`, or set LSPI_RUST_ANALYZER_COMMAND."
+                    );
+                    failures.push(format!(
+                        "rust-analyzer preflight failed for server id={}",
+                        s.id
+                    ));
+                    continue;
+                }
 
                 let output = TokioCommand::new(&command)
                     .arg("--version")
@@ -179,6 +217,13 @@ async fn main() -> Result<()> {
                 } else {
                     println!("server_version: id={} <unknown>", s.id);
                 }
+            }
+
+            if !failures.is_empty() {
+                anyhow::bail!(
+                    "doctor failed for {} server(s). See stderr for details.",
+                    failures.len()
+                );
             }
 
             Ok(())
