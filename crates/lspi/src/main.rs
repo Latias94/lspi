@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::collections::VecDeque;
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::process::Command as TokioCommand;
@@ -60,6 +61,12 @@ enum Command {
         /// Detect Rust/C# projects and generate a tailored config (best-effort)
         #[arg(long)]
         wizard: bool,
+        /// Enable interactive prompts when generating the config
+        #[arg(long)]
+        interactive: bool,
+        /// Disable interactive prompts when generating the config
+        #[arg(long, conflicts_with = "interactive")]
+        non_interactive: bool,
     },
 }
 
@@ -234,6 +241,8 @@ async fn main() -> Result<()> {
             write,
             force,
             wizard,
+            interactive,
+            non_interactive,
         } => {
             let workspace_root = workspace_root
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -247,8 +256,10 @@ async fn main() -> Result<()> {
                 workspace_root.join(output_path)
             };
 
+            let interactive = resolve_interactive(wizard, interactive, non_interactive);
+
             let servers_block = if wizard {
-                generate_wizard_servers(&workspace_root)
+                generate_wizard_servers(&workspace_root, interactive)
             } else {
                 default_servers_block()
             };
@@ -284,6 +295,7 @@ max_total_chars_hard = 2000000
                 println!("# args = [\"mcp\", \"--workspace-root\", \".\"]");
                 println!("#");
                 println!("# 3) More details: docs/CODEX.md");
+                println!("# 4) Recommended agent prompt snippet: docs/AGENTS_SNIPPETS.md");
                 return Ok(());
             }
 
@@ -309,8 +321,34 @@ max_total_chars_hard = 2000000
             println!("command = \"lspi\"");
             println!("args = [\"mcp\", \"--workspace-root\", \".\"]");
             println!("details: docs/CODEX.md");
+            println!("agents: docs/AGENTS_SNIPPETS.md");
             Ok(())
         }
+    }
+}
+
+fn resolve_interactive(wizard: bool, interactive_flag: bool, non_interactive: bool) -> bool {
+    if interactive_flag {
+        return true;
+    }
+    if non_interactive {
+        return false;
+    }
+    if !wizard {
+        return false;
+    }
+    io::stdin().is_terminal() && io::stdout().is_terminal()
+}
+
+fn prompt_line(prompt: &str) -> Option<String> {
+    print!("{prompt}");
+    let _ = io::stdout().flush();
+    let mut buf = String::new();
+    if io::stdin().read_line(&mut buf).is_ok() {
+        let s = buf.trim().to_string();
+        if s.is_empty() { None } else { Some(s) }
+    } else {
+        None
     }
 }
 
@@ -350,15 +388,32 @@ struct DetectedProjects {
     csharp_kind: Option<&'static str>, // "sln" or "csproj"
 }
 
-fn generate_wizard_servers(workspace_root: &Path) -> String {
+#[derive(Debug, Clone, Copy)]
+struct WizardSelection {
+    include_rust: bool,
+    include_csharp: bool,
+}
+
+fn generate_wizard_servers(workspace_root: &Path, interactive: bool) -> String {
     let detected = detect_projects(workspace_root, 4, 20_000);
+
+    let selection = if interactive {
+        select_wizard_servers(&detected)
+    } else {
+        WizardSelection {
+            include_rust: detected.rust_root.is_some(),
+            include_csharp: detected.csharp_root.is_some(),
+        }
+    };
     let mut blocks = Vec::new();
 
-    if let Some(rust_root) = detected.rust_root.as_deref() {
+    if selection.include_rust {
+        let rust_root = detected.rust_root.as_deref().unwrap_or(workspace_root);
         blocks.push(server_block_rust(workspace_root, rust_root));
     }
 
-    if let Some(csharp_root) = detected.csharp_root.as_deref() {
+    if selection.include_csharp {
+        let csharp_root = detected.csharp_root.as_deref().unwrap_or(workspace_root);
         blocks.push(server_block_omnisharp(workspace_root, csharp_root));
     }
 
@@ -375,9 +430,105 @@ fn generate_wizard_servers(workspace_root: &Path) -> String {
         let kind = detected.csharp_kind.unwrap_or("csharp");
         out.push_str(&format!("# - Detected: C# ({kind})\n"));
     }
+    out.push_str(&format!(
+        "# - Selected: rust={} csharp={}\n",
+        selection.include_rust, selection.include_csharp
+    ));
     out.push('\n');
     out.push_str(&blocks.join("\n\n"));
     out
+}
+
+fn select_wizard_servers(detected: &DetectedProjects) -> WizardSelection {
+    let detected_rust = detected.rust_root.is_some();
+    let detected_csharp = detected.csharp_root.is_some();
+
+    let default = WizardSelection {
+        include_rust: detected_rust || !detected_csharp,
+        include_csharp: detected_csharp,
+    };
+
+    if detected_rust && detected_csharp {
+        println!("Detected Rust (Cargo) and C# project files.");
+        println!("Which servers do you want in the generated config?");
+        println!("  1) Rust only (rust-analyzer)");
+        println!("  2) C# only (OmniSharp)");
+        println!("  3) Both (default)");
+        match prompt_line("Select [1/2/3]: ").as_deref() {
+            Some("1") => WizardSelection {
+                include_rust: true,
+                include_csharp: false,
+            },
+            Some("2") => WizardSelection {
+                include_rust: false,
+                include_csharp: true,
+            },
+            Some("3") | None => default,
+            _ => default,
+        }
+    } else if detected_rust {
+        println!("Detected Rust (Cargo).");
+        let include_rust_answer = prompt_line("Include rust-analyzer server? [Y/n]: ")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let include_rust = !(include_rust_answer == "n" || include_rust_answer == "no");
+
+        let include_csharp_answer = prompt_line("Also add C# (OmniSharp) server? [y/N]: ")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let include_csharp = include_csharp_answer == "y" || include_csharp_answer == "yes";
+
+        let sel = WizardSelection {
+            include_rust,
+            include_csharp,
+        };
+        if !sel.include_rust && !sel.include_csharp {
+            return default;
+        }
+        sel
+    } else if detected_csharp {
+        let kind = detected.csharp_kind.unwrap_or("csharp");
+        println!("Detected C# ({kind}).");
+        let include_csharp_answer = prompt_line("Include OmniSharp server? [Y/n]: ")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let include_csharp = !(include_csharp_answer == "n" || include_csharp_answer == "no");
+
+        let include_rust_answer = prompt_line("Also add Rust (rust-analyzer) server? [y/N]: ")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let include_rust = include_rust_answer == "y" || include_rust_answer == "yes";
+
+        let sel = WizardSelection {
+            include_rust,
+            include_csharp,
+        };
+        if !sel.include_rust && !sel.include_csharp {
+            return default;
+        }
+        sel
+    } else {
+        println!("No Rust/C# project files detected (best-effort scan).");
+        println!("Which servers do you want in the generated config?");
+        println!("  1) Rust only (rust-analyzer) (default)");
+        println!("  2) C# only (OmniSharp)");
+        println!("  3) Both");
+        match prompt_line("Select [1/2/3]: ").as_deref() {
+            Some("1") | None => WizardSelection {
+                include_rust: true,
+                include_csharp: false,
+            },
+            Some("2") => WizardSelection {
+                include_rust: false,
+                include_csharp: true,
+            },
+            Some("3") => WizardSelection {
+                include_rust: true,
+                include_csharp: true,
+            },
+            _ => default,
+        }
+    }
 }
 
 fn server_block_rust(workspace_root: &Path, root_dir: &Path) -> String {
