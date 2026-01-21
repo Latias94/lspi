@@ -4,20 +4,27 @@ Giving AI the sight of LSP.
 
 `lspi` bridges **Language Server Protocol (LSP)** capabilities to **AI coding CLIs** (starting with Codex) via an **MCP server** over stdio.
 
-Current focus:
+## What it does
 
-- Rust via `rust-analyzer`
-- C# via OmniSharp (`omnisharp -lsp`)
-- Generic stdio LSP (`kind = "generic"`, experimental)
-- TypeScript via `typescript-language-server` (through `kind = "generic"`)
-- Go via `gopls` (through `kind = "generic"`)
-- Python via `pyright-langserver` (through `kind = "generic"`)
-- Lua via `lua-language-server` (through `kind = "generic"`)
-- C++ via `clangd` (through `kind = "generic"`)
+- Instant symbol navigation (definition/references/hover)
+- Safe rename with preview-first edits (`dry_run=true` by default)
+- Language-server lifecycle controls (restart/stop)
+- Multi-server routing by file extension + root directory
 
-## Status
+## Supported language servers
 
-See `docs/PROGRESS.md` and `docs/ROADMAP.md`.
+`lspi` does not bundle language servers. Install the servers you need and configure them in `lspi` config.
+For any LSP that speaks JSON-RPC over stdio, use `kind = "generic"`.
+
+Known-good setups (examples and smoke tests are included in this repo):
+
+- Rust: `rust-analyzer`
+- C#: OmniSharp in LSP mode (`omnisharp -lsp`)
+- TypeScript: `typescript-language-server`
+- Go: `gopls`
+- Python: `pyright-langserver`
+- Lua: `lua-language-server`
+- C++: `clangd`
 
 ## Install
 
@@ -25,10 +32,10 @@ Prerequisites:
 
 - Rust toolchain (stable)
 
-Install `lspi` from source (recommended for now):
+Install `lspi` from source:
 
 ```bash
-cargo install --path crates/lspi
+cargo install --path crates/lspi --locked
 ```
 
 Verify:
@@ -36,30 +43,6 @@ Verify:
 ```bash
 lspi --version
 ```
-
-## Language Server Prerequisites
-
-`lspi` does not bundle language servers. Install the ones you need:
-
-### Rust (`rust-analyzer`)
-
-```bash
-rustup component add rust-analyzer
-```
-
-Or set `LSPI_RUST_ANALYZER_COMMAND` to a `rust-analyzer` binary path.
-
-### C# (OmniSharp)
-
-- Install .NET SDK and verify:
-
-  ```bash
-  dotnet --info
-  ```
-
-- Install OmniSharp (LSP mode) and ensure `omnisharp` is runnable, or set `LSPI_OMNISHARP_COMMAND`.
-
-Run `lspi doctor --workspace-root .` for best-effort checks and hints.
 
 ## Quickstart (Codex)
 
@@ -92,7 +75,7 @@ Notes:
 
 ## Configuration
 
-See `docs/CONFIG.md` for the full schema and discovery order.
+See [`docs/CONFIG.md`](docs/CONFIG.md) for the full schema and discovery order.
 
 Common environment variables:
 
@@ -100,62 +83,20 @@ Common environment variables:
 - `LSPI_RUST_ANALYZER_COMMAND`: override `rust-analyzer` command
 - `LSPI_OMNISHARP_COMMAND`: override `omnisharp` command
 
+## Optional: add agent instructions / skill metadata
+
+- Agent prompt snippet (copy-paste): [`docs/AGENTS_SNIPPETS.md`](docs/AGENTS_SNIPPETS.md)
+- Codex skill definition: [`.codex/skills/lspi/SKILL.md`](.codex/skills/lspi/SKILL.md)
+
 ## Safety
 
 - `rename_symbol` and `rename_symbol_strict` default to preview (`dry_run=true`).
 - To apply edits, pass `dry_run=false`.
 - Optional strict apply: provide `expected_before_sha256` (per-file SHA-256) and enable backups.
 
-## Docs
+## Optional: smoke tests
 
-- Architecture: `docs/ARCHITECTURE.md`
-- ADRs: `docs/adr/README.md`
-- Configuration: `docs/CONFIG.md`
-- Manual smoke test: `docs/SMOKE_TEST.md`
-- Codex integration: `docs/CODEX.md`
-- Agent prompt snippets: `docs/AGENTS_SNIPPETS.md`
-- Codex skill (optional): `.codex/skills/lspi/SKILL.md`
-
-## Codex Skill (Optional)
-
-Codex supports "skills" discovered from:
-
-- Repo-scoped: `<repo>/.codex/skills/**/SKILL.md`
-- User-scoped: `$CODEX_HOME/skills/**/SKILL.md` (usually `~/.codex/skills`)
-
-This repo ships a ready-to-use skill at `.codex/skills/lspi/`.
-
-### Option A: Use repo-scoped skill
-
-- If your project repo includes `.codex/skills/lspi/`, Codex can discover it when you run `codex` from that repo.
-
-### Option B: Install the skill globally (recommended)
-
-Copy (or symlink) this directory to your Codex skills folder:
-
-- `~/.codex/skills/lspi/`
-
-Or install it automatically:
-
-```bash
-lspi skill install --scope user
-```
-
-Example (macOS/Linux):
-
-```bash
-mkdir -p ~/.codex/skills
-cp -R .codex/skills/lspi ~/.codex/skills/
-```
-
-Example (PowerShell):
-
-```powershell
-New-Item -ItemType Directory -Force -Path "$HOME\\.codex\\skills" | Out-Null
-Copy-Item -Recurse -Force ".codex\\skills\\lspi" "$HOME\\.codex\\skills\\"
-```
-
-Note: installing `lspi` via `cargo install` does not install this skill; it's just optional prompt metadata.
+See [`docs/SMOKE_TEST.md`](docs/SMOKE_TEST.md) for end-to-end scripts (Rust/C#/TypeScript/Go/Python/Lua/C++).
 
 ## Tools (MCP)
 
@@ -172,7 +113,7 @@ Note: installing `lspi` via `cargo install` does not install this skill; it's ju
 - `get_diagnostics`
 - `restart_server`, `stop_server`
 
-If you want a “least privilege” toolset (e.g. read-only navigation), use `mcp.tools` allow/exclude in your config. See `docs/CONFIG.md`.
+If you want a “least privilege” toolset (e.g. read-only navigation), use `mcp.tools` allow/exclude in your config. See [`docs/CONFIG.md`](docs/CONFIG.md).
 
 ## Development
 
@@ -199,8 +140,3 @@ Format:
 ```bash
 cargo fmt
 ```
-
-## CI / Release
-
-- CI runs on GitHub Actions (`.github/workflows/ci.yml`) with `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo nextest`.
-- Release automation is based on `cargo-dist` (`dist-workspace.toml`, `.github/workflows/release.yml`) and is triggered by version tags (e.g. `v0.1.0`).
