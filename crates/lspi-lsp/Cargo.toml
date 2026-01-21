@@ -6,12 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-publish = false
 description = "LSP client adapters used by lspi."
 
 [dependencies]
 anyhow.workspace = true
-lspi-core = { path = "../lspi-core" }
+lspi-core = { workspace = true }
 url.workspace = true
 serde.workspace = true
 serde_json.workspace = true

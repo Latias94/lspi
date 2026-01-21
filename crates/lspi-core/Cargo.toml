@@ -6,7 +6,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-publish = false
 description = "Core utilities for lspi (config, snippet, text edits, hashing)."
 
 [dependencies]

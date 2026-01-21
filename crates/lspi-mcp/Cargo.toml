@@ -6,13 +6,12 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-publish = false
 description = "MCP server implementation for lspi."
 
 [dependencies]
 anyhow.workspace = true
-lspi-core = { path = "../lspi-core" }
-lspi-lsp = { path = "../lspi-lsp" }
+lspi-core = { workspace = true }
+lspi-lsp = { workspace = true }
 rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true

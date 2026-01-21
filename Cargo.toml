@@ -23,6 +23,9 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
 toml = "0.8.20"
 url = "2.5.4"
+lspi-core = { path = "crates/lspi-core", version = "0.1.0" }
+lspi-lsp = { path = "crates/lspi-lsp", version = "0.1.0" }
+lspi-mcp = { path = "crates/lspi-mcp", version = "0.1.0" }
 
 # The profile that 'dist' will build with
 [profile.dist]

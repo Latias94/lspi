@@ -27,9 +27,9 @@ bin-dir = "{ bin }{ binary-ext }"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-lspi-core = { path = "../lspi-core" }
-lspi-lsp = { path = "../lspi-lsp" }
-lspi-mcp = { path = "../lspi-mcp" }
+lspi-core = { workspace = true }
+lspi-lsp = { workspace = true }
+lspi-mcp = { workspace = true }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
