@@ -1,0 +1,25 @@
+# Normalize line endings across platforms.
+# This helps avoid noisy "LF will be replaced by CRLF" warnings on Windows.
+* text=auto
+
+# Text formats we want to keep as LF in the repo and working tree.
+*.rs          text eol=lf
+*.toml        text eol=lf
+*.json        text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+*.md          text eol=lf
+*.ps1         text eol=lf
+*.sh          text eol=lf
+
+# Common binary files.
+*.png         binary
+*.jpg         binary
+*.jpeg        binary
+*.gif         binary
+*.ico         binary
+*.zip         binary
+*.tar         binary
+*.gz          binary
+*.xz          binary
+*.pdf         binary
