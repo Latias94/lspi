@@ -13,6 +13,7 @@ Current focus:
 - Go via `gopls` (through `kind = "generic"`)
 - Python via `pyright-langserver` (through `kind = "generic"`)
 - Lua via `lua-language-server` (through `kind = "generic"`)
+- C++ via `clangd` (through `kind = "generic"`)
 
 ## Status
 

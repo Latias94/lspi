@@ -248,3 +248,26 @@ Prerequisites (best-effort):
 Notes:
 
 - The script defaults to `-SkipIfMissing` so it does not fail if prerequisites are missing.
+
+## C++ (generic LSP) smoke test
+
+This repository includes a minimal C++ project at `samples/cpp/Hello/` and a smoke script:
+
+```powershell
+pwsh scripts/mcp_smoke_cpp.ps1
+```
+
+Run against a real C++ project:
+
+```powershell
+pwsh scripts/mcp_smoke_cpp.ps1 -WorkspaceRoot C:\path\to\my-cpp-project
+```
+
+Prerequisites (best-effort):
+
+- `clangd` available on `PATH`
+
+Notes:
+
+- For best results on real projects, provide compilation flags via `compile_commands.json`, `.clangd`, or `compile_flags.txt`.
+- The script defaults to `-SkipIfMissing` so it does not fail if prerequisites are missing.

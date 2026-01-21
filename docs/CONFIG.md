@@ -135,6 +135,20 @@ initialize_timeout_ms = 20000
 request_timeout_ms = 30000
 ```
 
+### Generic LSP example (C++ / clangd)
+
+```toml
+[[servers]]
+id = "cpp"
+kind = "generic"
+extensions = ["cpp", "cc", "cxx", "h", "hpp"]
+language_id = "cpp"
+command = "clangd"
+args = []
+initialize_timeout_ms = 20000
+request_timeout_ms = 30000
+```
+
 ### Lifecycle options (optional)
 
 These options control how `lspi` manages long-running language server processes:
