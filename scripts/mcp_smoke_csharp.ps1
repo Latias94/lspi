@@ -67,7 +67,6 @@ function Assert-NoJsonRpcError($resp, $label) {
 function Get-ToolStructuredContent($resp) {
   if ($null -eq $resp.result) { return $null }
   if ($null -ne $resp.result.structuredContent) { return $resp.result.structuredContent }
-  if ($null -ne $resp.result.structured_content) { return $resp.result.structured_content }
   return $null
 }
 
@@ -402,6 +401,43 @@ try {
   if ($scRestart.ok -ne $true) {
     $payload = $restartResp | ConvertTo-Json -Compress -Depth 10
     throw "restart_server returned ok=false: $payload"
+  }
+
+  Write-Host "tools/call get_document_symbols ..." -ForegroundColor Cyan
+  Write-JsonLine $stdin @{
+    jsonrpc = "2.0"
+    id = 8
+    method = "tools/call"
+    params = @{
+      name = "get_document_symbols"
+      arguments = @{
+        file_path = $testFileRel
+        max_results = 2000
+      }
+    }
+  }
+  $symResp = Read-ResponseById $stdout 8 $TimeoutSeconds
+  Assert-NoJsonRpcError $symResp "get_document_symbols"
+  Assert-ToolOk $symResp "get_document_symbols"
+
+  if ($posOk) {
+    Write-Host "tools/call hover_at ..." -ForegroundColor Cyan
+    Write-JsonLine $stdin @{
+      jsonrpc = "2.0"
+      id = 9
+      method = "tools/call"
+      params = @{
+        name = "hover_at"
+        arguments = @{
+          file_path = $testFileRel
+          line = $pos.line
+          character = $pos.character
+        }
+      }
+    }
+    $hoverResp = Read-ResponseById $stdout 9 $TimeoutSeconds
+    Assert-NoJsonRpcError $hoverResp "hover_at"
+    Assert-ToolOk $hoverResp "hover_at"
   }
 
   Write-Host "OK" -ForegroundColor Green

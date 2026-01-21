@@ -7,17 +7,24 @@ This document provides copy-paste prompt snippets you can add to your project's 
 - Purpose: Provide symbol-level navigation and safe refactoring via LSP through `lspi` (MCP server).
 - When to use:
   - Jump to definitions / implementations
+  - Inspect hover/type information at a position
   - Find references across the workspace
   - Rename symbols safely across multiple files
   - Inspect diagnostics before/after changes
 - Workflow:
   1) Identify the target symbol (name + file, or file + position)
   2) Use definition/references to confirm the correct symbol
+  2.5) Use hover / document symbols / workspace symbols to gather context if needed
   3) Preview rename first (`dry_run=true`), then apply if safe
   4) Summarize changes (files, locations, reason) for traceability
 - Tools:
   - `find_definition`, `find_definition_at`
   - `find_references`, `find_references_at`
+  - `hover_at`
+  - `find_implementation_at`
+  - `find_type_definition_at`
+  - `get_document_symbols`
+  - `search_workspace_symbols`
   - `rename_symbol`, `rename_symbol_strict`
   - `get_diagnostics`
   - `restart_server` / `stop_server` (if the language server is stuck or you need to release resources)
@@ -39,6 +46,11 @@ You can paste the following into your project's `AGENTS.md`:
 - 常用工具：
   - find_definition / find_definition_at
   - find_references / find_references_at
+  - hover_at
+  - find_implementation_at
+  - find_type_definition_at
+  - get_document_symbols
+  - search_workspace_symbols
   - rename_symbol / rename_symbol_strict
   - get_diagnostics
   - restart_server / stop_server

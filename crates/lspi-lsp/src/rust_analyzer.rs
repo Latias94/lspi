@@ -16,7 +16,8 @@ use crate::lsp::{
 };
 use crate::symbol::{
     DefinitionMatch, FlatSymbol, ReferenceMatch, RenameCandidate, ResolvedLocation, ResolvedSymbol,
-    parse_locations, parse_symbols, to_lsp_location, to_resolved_location,
+    WorkspaceSymbolMatch, parse_locations, parse_symbols, parse_workspace_symbols, to_lsp_location,
+    to_resolved_location,
 };
 
 #[derive(Debug, Clone)]
@@ -246,6 +247,66 @@ impl RustAnalyzerClient {
         Ok(Vec::new())
     }
 
+    async fn implementation_values_with_retry(
+        &self,
+        file_path: &Path,
+        position: LspPosition,
+    ) -> Result<Vec<Value>> {
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 0..3 {
+            match self.lsp.implementation(file_path, position.clone()).await {
+                Ok(value) => match parse_locations(value) {
+                    Ok(locs) => {
+                        if !locs.is_empty() {
+                            return Ok(locs);
+                        }
+                        if attempt == 0 {
+                            let _ = self.wait_quiescent().await?;
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                    Err(e) => last_err = Some(e),
+                },
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        if let Some(err) = last_err {
+            return Err(err);
+        }
+        Ok(Vec::new())
+    }
+
+    async fn type_definition_values_with_retry(
+        &self,
+        file_path: &Path,
+        position: LspPosition,
+    ) -> Result<Vec<Value>> {
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 0..3 {
+            match self.lsp.type_definition(file_path, position.clone()).await {
+                Ok(value) => match parse_locations(value) {
+                    Ok(locs) => {
+                        if !locs.is_empty() {
+                            return Ok(locs);
+                        }
+                        if attempt == 0 {
+                            let _ = self.wait_quiescent().await?;
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                    Err(e) => last_err = Some(e),
+                },
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        if let Some(err) = last_err {
+            return Err(err);
+        }
+        Ok(Vec::new())
+    }
+
     pub async fn find_definition_by_name(
         &self,
         file_path: &Path,
@@ -365,6 +426,114 @@ impl RustAnalyzerClient {
             }
         }
         Ok((resolved, truncated))
+    }
+
+    pub async fn implementation_at(
+        &self,
+        file_path: &Path,
+        position: LspPosition,
+        max_results: usize,
+    ) -> Result<Vec<ResolvedLocation>> {
+        self.open_or_sync(file_path, "rust").await?;
+
+        if let Some(status) = self.wait_quiescent().await?
+            && !status.quiescent
+        {
+            warn!(
+                "rust-analyzer not quiescent yet: health={} message={:?}",
+                status.health, status.message
+            );
+        }
+
+        let values = self
+            .implementation_values_with_retry(file_path, position)
+            .await?;
+
+        let mut resolved = Vec::new();
+        for v in values.into_iter().take(max_results.max(1)) {
+            let lsp_loc = to_lsp_location(&v)?;
+            if let Ok(r) = to_resolved_location(&lsp_loc) {
+                resolved.push(r);
+            }
+        }
+        Ok(resolved)
+    }
+
+    pub async fn type_definition_at(
+        &self,
+        file_path: &Path,
+        position: LspPosition,
+        max_results: usize,
+    ) -> Result<Vec<ResolvedLocation>> {
+        self.open_or_sync(file_path, "rust").await?;
+
+        if let Some(status) = self.wait_quiescent().await?
+            && !status.quiescent
+        {
+            warn!(
+                "rust-analyzer not quiescent yet: health={} message={:?}",
+                status.health, status.message
+            );
+        }
+
+        let values = self
+            .type_definition_values_with_retry(file_path, position)
+            .await?;
+
+        let mut resolved = Vec::new();
+        for v in values.into_iter().take(max_results.max(1)) {
+            let lsp_loc = to_lsp_location(&v)?;
+            if let Ok(r) = to_resolved_location(&lsp_loc) {
+                resolved.push(r);
+            }
+        }
+        Ok(resolved)
+    }
+
+    pub async fn hover_at(&self, file_path: &Path, position: LspPosition) -> Result<Value> {
+        self.open_or_sync(file_path, "rust").await?;
+        let _ = self.wait_quiescent().await?;
+        self.lsp.hover(file_path, position).await
+    }
+
+    pub async fn document_symbols(
+        &self,
+        file_path: &Path,
+        max_symbols: usize,
+    ) -> Result<Vec<ResolvedSymbol>> {
+        self.open_or_sync(file_path, "rust").await?;
+
+        if let Some(status) = self.wait_quiescent().await?
+            && !status.quiescent
+        {
+            warn!(
+                "rust-analyzer not quiescent yet: health={} message={:?}",
+                status.health, status.message
+            );
+        }
+
+        let symbols = self.document_symbols_with_retry(file_path).await?;
+        Ok(symbols
+            .into_iter()
+            .take(max_symbols.max(1))
+            .map(|s| ResolvedSymbol {
+                name: s.name,
+                kind: s.kind,
+                range: s.range,
+                selection_range: s.selection_range,
+            })
+            .collect())
+    }
+
+    pub async fn workspace_symbols(
+        &self,
+        query: &str,
+        max_results: usize,
+    ) -> Result<Vec<WorkspaceSymbolMatch>> {
+        let raw = self.lsp.workspace_symbols(query).await?;
+        let mut out = parse_workspace_symbols(raw)?;
+        out.truncate(max_results.max(1));
+        Ok(out)
     }
 
     pub async fn find_references_by_name(

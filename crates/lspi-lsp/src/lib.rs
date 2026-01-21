@@ -11,6 +11,7 @@ pub use omnisharp::{
 pub use symbol::parse_symbol_kind;
 pub use symbol::{
     DefinitionMatch, ReferenceMatch, RenameCandidate, ResolvedLocation, ResolvedSymbol,
+    WorkspaceSymbolMatch,
 };
 
 pub use rust_analyzer::{

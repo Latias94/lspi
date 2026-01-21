@@ -23,6 +23,7 @@ For a living status snapshot, see `docs/PROGRESS.md`.
   - `rename_symbol_strict`
   - `get_diagnostics`
   - `restart_server`
+  - `stop_server`
 - Config loading + workspace root resolution
 - Position normalization and bounded fuzzing
 - Safe edit preview by default
@@ -43,6 +44,7 @@ For a living status snapshot, see `docs/PROGRESS.md`.
 - Better “first request” reliability (warmup/index wait strategy via adapter)
 - Smarter symbol disambiguation and better candidate presentation
 - Improved error messages (missing server, missing config, unsupported method)
+- Add read-only navigation helpers (hover / implementation / typeDefinition / document symbols / workspace symbols)
 - Add `doctor` / `setup` CLI helpers (optional)
 - Add tests around edit application and position normalization
 - Optional strict apply with per-file hashes (preview/apply handshake)

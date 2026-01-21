@@ -67,6 +67,11 @@ impl LspiMcpServer {
                 tool_find_definition_at(),
                 tool_find_references(),
                 tool_find_references_at(),
+                tool_hover_at(),
+                tool_find_implementation_at(),
+                tool_find_type_definition_at(),
+                tool_get_document_symbols(),
+                tool_search_workspace_symbols(),
                 tool_rename_symbol(),
                 tool_rename_symbol_strict(),
                 tool_get_diagnostics(),
@@ -251,6 +256,11 @@ impl ServerHandler for LspiMcpServer {
             "find_definition_at" => self.find_definition_at(request).await,
             "find_references" => self.find_references(request).await,
             "find_references_at" => self.find_references_at(request).await,
+            "hover_at" => self.hover_at(request).await,
+            "find_implementation_at" => self.find_implementation_at(request).await,
+            "find_type_definition_at" => self.find_type_definition_at(request).await,
+            "get_document_symbols" => self.get_document_symbols(request).await,
+            "search_workspace_symbols" => self.search_workspace_symbols(request).await,
             "get_diagnostics" => self.get_diagnostics(request).await,
             "rename_symbol" => self.rename_symbol(request).await,
             "rename_symbol_strict" => self.rename_symbol_strict(request).await,
@@ -349,6 +359,61 @@ fn effective_max_total_chars(
     (effective, warning)
 }
 
+fn is_method_not_found_error(err: &anyhow::Error) -> bool {
+    let msg = err.to_string().to_ascii_lowercase();
+    msg.contains("-32601") || msg.contains("method not found")
+}
+
+fn hover_to_text(value: &Value) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+    if let Some(s) = value.as_str() {
+        return Some(s.to_string());
+    }
+
+    let contents = value.get("contents")?;
+    match contents {
+        Value::String(s) => Some(s.clone()),
+        Value::Array(arr) => {
+            let mut parts = Vec::new();
+            for item in arr {
+                if let Some(s) = hover_content_item_to_text(item) {
+                    let s = s.trim().to_string();
+                    if !s.is_empty() {
+                        parts.push(s);
+                    }
+                }
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join("\n\n"))
+            }
+        }
+        Value::Object(_) => hover_content_item_to_text(contents),
+        _ => None,
+    }
+}
+
+fn hover_content_item_to_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::Object(obj) => {
+            // MarkupContent: { kind: "markdown"|"plaintext", value: "..." }
+            if let Some(v) = obj.get("value").and_then(|v| v.as_str()) {
+                return Some(v.to_string());
+            }
+            // MarkedString: { language: "...", value: "..." }
+            if let Some(v) = obj.get("value").and_then(|v| v.as_str()) {
+                return Some(v.to_string());
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct FindDefinitionArgs {
     file_path: String,
@@ -421,6 +486,57 @@ struct FindReferencesAtArgs {
     snippet_context_lines: Option<usize>,
     #[serde(default)]
     max_snippet_chars: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HoverAtArgs {
+    file_path: String,
+    line: u32,
+    character: u32,
+    #[serde(default)]
+    max_total_chars: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FindImplementationAtArgs {
+    file_path: String,
+    line: u32,
+    character: u32,
+    #[serde(default)]
+    max_results: Option<usize>,
+    #[serde(default)]
+    max_total_chars: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FindTypeDefinitionAtArgs {
+    file_path: String,
+    line: u32,
+    character: u32,
+    #[serde(default)]
+    max_results: Option<usize>,
+    #[serde(default)]
+    max_total_chars: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetDocumentSymbolsArgs {
+    file_path: String,
+    #[serde(default)]
+    max_results: Option<usize>,
+    #[serde(default)]
+    max_total_chars: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchWorkspaceSymbolsArgs {
+    query: String,
+    #[serde(default)]
+    file_path: Option<String>,
+    #[serde(default)]
+    max_results: Option<usize>,
+    #[serde(default)]
+    max_total_chars: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -595,6 +711,85 @@ impl RoutedClient {
         }
     }
 
+    async fn implementation_at(
+        &self,
+        file_path: &Path,
+        position: lspi_lsp::LspPosition,
+        max_results: usize,
+    ) -> anyhow::Result<Vec<lspi_lsp::ResolvedLocation>> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .implementation_at(file_path, position, max_results)
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .implementation_at(file_path, position, max_results)
+                    .await
+            }
+        }
+    }
+
+    async fn type_definition_at(
+        &self,
+        file_path: &Path,
+        position: lspi_lsp::LspPosition,
+        max_results: usize,
+    ) -> anyhow::Result<Vec<lspi_lsp::ResolvedLocation>> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .type_definition_at(file_path, position, max_results)
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .type_definition_at(file_path, position, max_results)
+                    .await
+            }
+        }
+    }
+
+    async fn hover_at(
+        &self,
+        file_path: &Path,
+        position: lspi_lsp::LspPosition,
+    ) -> anyhow::Result<Value> {
+        match self {
+            RoutedClient::Rust { client, .. } => client.hover_at(file_path, position).await,
+            RoutedClient::OmniSharp { client, .. } => client.hover_at(file_path, position).await,
+        }
+    }
+
+    async fn document_symbols(
+        &self,
+        file_path: &Path,
+        max_results: usize,
+    ) -> anyhow::Result<Vec<lspi_lsp::ResolvedSymbol>> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client.document_symbols(file_path, max_results).await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client.document_symbols(file_path, max_results).await
+            }
+        }
+    }
+
+    async fn workspace_symbols(
+        &self,
+        query: &str,
+        max_results: usize,
+    ) -> anyhow::Result<Vec<lspi_lsp::WorkspaceSymbolMatch>> {
+        match self {
+            RoutedClient::Rust { client, .. } => client.workspace_symbols(query, max_results).await,
+            RoutedClient::OmniSharp { client, .. } => {
+                client.workspace_symbols(query, max_results).await
+            }
+        }
+    }
+
     async fn get_diagnostics(
         &self,
         file_path: &Path,
@@ -680,6 +875,13 @@ impl LspiMcpServer {
             ));
         };
 
+        self.client_for_server(server).await
+    }
+
+    async fn client_for_server(
+        &self,
+        server: &lspi_core::config::ResolvedServerConfig,
+    ) -> Result<RoutedClient, McpError> {
         if is_rust_analyzer_kind(&server.kind) {
             let client = self.rust_analyzer_for_server(server).await?;
             return Ok(RoutedClient::Rust {
@@ -1452,6 +1654,617 @@ impl LspiMcpServer {
                 structured_content["reference_locations"]
                     .as_u64()
                     .unwrap_or(0)
+            ))],
+            structured_content: Some(structured_content),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
+    async fn hover_at(&self, request: CallToolRequestParam) -> Result<CallToolResult, McpError> {
+        let args: HoverAtArgs = parse_arguments(request.arguments)?;
+
+        let (max_total_chars, max_total_chars_warning) =
+            effective_max_total_chars(&self.state.config, args.max_total_chars);
+
+        let file_path = PathBuf::from(&args.file_path);
+        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
+
+        let file_bytes = tokio::fs::read(&abs_file)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let file_text = String::from_utf8(file_bytes)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let best_guess = lspi_core::position_fuzz::LspPosition {
+            line: args.line.saturating_sub(1),
+            character: args.character.saturating_sub(1),
+        };
+
+        let limits = lspi_core::position_fuzz::CandidateLimits::default();
+        let candidates = lspi_core::position_fuzz::candidate_lsp_positions(
+            &file_text,
+            args.line,
+            args.character,
+            limits,
+        )
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let mut last_err: Option<anyhow::Error> = None;
+        let mut used_pos: Option<lspi_lsp::LspPosition> = None;
+        let mut hover_value: Option<Value> = None;
+        let mut hover_text: Option<String> = None;
+
+        for c in candidates {
+            let pos = lspi_lsp::LspPosition {
+                line: c.line,
+                character: c.character,
+            };
+            match routed.hover_at(&abs_file, pos.clone()).await {
+                Ok(v) => {
+                    used_pos = Some(pos);
+                    hover_text = hover_to_text(&v).filter(|t| !t.trim().is_empty());
+                    hover_value = Some(v);
+                    if hover_text.is_some() {
+                        break;
+                    }
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        let Some(hover_value) = hover_value else {
+            return Ok(CallToolResult {
+                content: vec![Content::text(
+                    "Hover lookup failed at the provided position.",
+                )],
+                structured_content: Some(json!({
+                    "ok": false,
+                    "tool": "hover_at",
+                    "message": "hover lookup failed",
+                    "error": last_err.map(|e| e.to_string()),
+                })),
+                is_error: Some(true),
+                meta: None,
+            });
+        };
+
+        let mut warnings = Vec::<Value>::new();
+        if let Some(used) = used_pos.clone()
+            && (used.line != best_guess.line || used.character != best_guess.character)
+        {
+            warnings.push(json!({
+                "kind": "position_fuzzing",
+                "message": "Applied bounded position fuzzing to locate the symbol position.",
+                "input": { "line": args.line, "character": args.character },
+                "used_lsp_position": { "line": used.line, "character": used.character }
+            }));
+        }
+        if let Some(w) = max_total_chars_warning {
+            warnings.push(w);
+        }
+
+        let mut structured_content = json!({
+            "ok": true,
+            "tool": "hover_at",
+            "server_id": server_id,
+            "input": {
+                "file_path": args.file_path,
+                "line": args.line,
+                "character": args.character,
+                "max_total_chars": max_total_chars
+            },
+            "used_lsp_position": used_pos.map(|p| json!({"line": p.line, "character": p.character})),
+            "hover": hover_text,
+            "hover_raw": hover_value,
+            "warnings": warnings,
+            "truncated": false
+        });
+
+        enforce_global_output_caps(max_total_chars, false, &mut structured_content);
+
+        Ok(CallToolResult {
+            content: vec![Content::text(
+                if structured_content["hover"]
+                    .as_str()
+                    .unwrap_or("")
+                    .is_empty()
+                {
+                    "No hover information."
+                } else {
+                    "Got hover information."
+                },
+            )],
+            structured_content: Some(structured_content),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
+    async fn find_implementation_at(
+        &self,
+        request: CallToolRequestParam,
+    ) -> Result<CallToolResult, McpError> {
+        let args: FindImplementationAtArgs = parse_arguments(request.arguments)?;
+
+        let max_results = args.max_results.unwrap_or(50).clamp(1, 500);
+        let (max_total_chars, max_total_chars_warning) =
+            effective_max_total_chars(&self.state.config, args.max_total_chars);
+
+        let file_path = PathBuf::from(&args.file_path);
+        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
+
+        let file_bytes = tokio::fs::read(&abs_file)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let file_text = String::from_utf8(file_bytes)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let best_guess = lspi_core::position_fuzz::LspPosition {
+            line: args.line.saturating_sub(1),
+            character: args.character.saturating_sub(1),
+        };
+
+        let limits = lspi_core::position_fuzz::CandidateLimits::default();
+        let candidates = lspi_core::position_fuzz::candidate_lsp_positions(
+            &file_text,
+            args.line,
+            args.character,
+            limits,
+        )
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let mut last_err: Option<anyhow::Error> = None;
+        let mut used_pos: Option<lspi_lsp::LspPosition> = None;
+        let mut locations: Option<Vec<lspi_lsp::ResolvedLocation>> = None;
+
+        for c in candidates {
+            let pos = lspi_lsp::LspPosition {
+                line: c.line,
+                character: c.character,
+            };
+            match routed
+                .implementation_at(&abs_file, pos.clone(), max_results)
+                .await
+            {
+                Ok(locs) => {
+                    used_pos = Some(pos);
+                    if !locs.is_empty() {
+                        locations = Some(locs);
+                        break;
+                    }
+                    locations = Some(locs);
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        let Some(locations) = locations else {
+            let method_not_supported = last_err
+                .as_ref()
+                .map(is_method_not_found_error)
+                .unwrap_or(false);
+            if method_not_supported {
+                return Ok(CallToolResult {
+                    content: vec![Content::text(
+                        "Implementation lookup is not supported by this language server.",
+                    )],
+                    structured_content: Some(json!({
+                        "ok": true,
+                        "tool": "find_implementation_at",
+                        "server_id": server_id,
+                        "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
+                        "implementation_locations": 0,
+                        "implementations": [],
+                        "warnings": [{
+                            "kind": "method_not_supported",
+                            "message": "textDocument/implementation is not supported by this server."
+                        }],
+                        "truncated": false
+                    })),
+                    is_error: Some(false),
+                    meta: None,
+                });
+            }
+
+            return Ok(CallToolResult {
+                content: vec![Content::text(
+                    "Implementation lookup failed at the provided position.",
+                )],
+                structured_content: Some(json!({
+                    "ok": false,
+                    "tool": "find_implementation_at",
+                    "message": "implementation lookup failed",
+                    "error": last_err.map(|e| e.to_string()),
+                })),
+                is_error: Some(true),
+                meta: None,
+            });
+        };
+
+        let mut implementations = Vec::new();
+        for loc in locations.into_iter().take(max_results.max(1)) {
+            implementations.push(LocationWithSnippet {
+                file_path: loc.file_path,
+                uri: loc.uri,
+                range: loc.range,
+                snippet: None,
+            });
+        }
+
+        let mut warnings = Vec::<Value>::new();
+        if let Some(used) = used_pos.clone()
+            && (used.line != best_guess.line || used.character != best_guess.character)
+        {
+            warnings.push(json!({
+                "kind": "position_fuzzing",
+                "message": "Applied bounded position fuzzing to locate the symbol position.",
+                "input": { "line": args.line, "character": args.character },
+                "used_lsp_position": { "line": used.line, "character": used.character }
+            }));
+        }
+        if let Some(w) = max_total_chars_warning {
+            warnings.push(w);
+        }
+
+        let mut structured_content = json!({
+            "ok": true,
+            "tool": "find_implementation_at",
+            "server_id": server_id,
+            "input": {
+                "file_path": args.file_path,
+                "line": args.line,
+                "character": args.character,
+                "max_results": max_results,
+                "max_total_chars": max_total_chars
+            },
+            "used_lsp_position": used_pos.map(|p| json!({"line": p.line, "character": p.character})),
+            "implementation_locations": implementations.len(),
+            "implementations": implementations,
+            "warnings": warnings,
+            "truncated": false
+        });
+        enforce_global_output_caps(max_total_chars, false, &mut structured_content);
+
+        Ok(CallToolResult {
+            content: vec![Content::text(format!(
+                "Found {} implementation locations.",
+                structured_content["implementation_locations"]
+                    .as_u64()
+                    .unwrap_or(0)
+            ))],
+            structured_content: Some(structured_content),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
+    async fn find_type_definition_at(
+        &self,
+        request: CallToolRequestParam,
+    ) -> Result<CallToolResult, McpError> {
+        let args: FindTypeDefinitionAtArgs = parse_arguments(request.arguments)?;
+
+        let max_results = args.max_results.unwrap_or(50).clamp(1, 500);
+        let (max_total_chars, max_total_chars_warning) =
+            effective_max_total_chars(&self.state.config, args.max_total_chars);
+
+        let file_path = PathBuf::from(&args.file_path);
+        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
+
+        let file_bytes = tokio::fs::read(&abs_file)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let file_text = String::from_utf8(file_bytes)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let best_guess = lspi_core::position_fuzz::LspPosition {
+            line: args.line.saturating_sub(1),
+            character: args.character.saturating_sub(1),
+        };
+
+        let limits = lspi_core::position_fuzz::CandidateLimits::default();
+        let candidates = lspi_core::position_fuzz::candidate_lsp_positions(
+            &file_text,
+            args.line,
+            args.character,
+            limits,
+        )
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let mut last_err: Option<anyhow::Error> = None;
+        let mut used_pos: Option<lspi_lsp::LspPosition> = None;
+        let mut locations: Option<Vec<lspi_lsp::ResolvedLocation>> = None;
+
+        for c in candidates {
+            let pos = lspi_lsp::LspPosition {
+                line: c.line,
+                character: c.character,
+            };
+            match routed
+                .type_definition_at(&abs_file, pos.clone(), max_results)
+                .await
+            {
+                Ok(locs) => {
+                    used_pos = Some(pos);
+                    if !locs.is_empty() {
+                        locations = Some(locs);
+                        break;
+                    }
+                    locations = Some(locs);
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        let Some(locations) = locations else {
+            let method_not_supported = last_err
+                .as_ref()
+                .map(is_method_not_found_error)
+                .unwrap_or(false);
+            if method_not_supported {
+                return Ok(CallToolResult {
+                    content: vec![Content::text(
+                        "Type definition lookup is not supported by this language server.",
+                    )],
+                    structured_content: Some(json!({
+                        "ok": true,
+                        "tool": "find_type_definition_at",
+                        "server_id": server_id,
+                        "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
+                        "type_definition_locations": 0,
+                        "type_definitions": [],
+                        "warnings": [{
+                            "kind": "method_not_supported",
+                            "message": "textDocument/typeDefinition is not supported by this server."
+                        }],
+                        "truncated": false
+                    })),
+                    is_error: Some(false),
+                    meta: None,
+                });
+            }
+
+            return Ok(CallToolResult {
+                content: vec![Content::text(
+                    "Type definition lookup failed at the provided position.",
+                )],
+                structured_content: Some(json!({
+                    "ok": false,
+                    "tool": "find_type_definition_at",
+                    "message": "type definition lookup failed",
+                    "error": last_err.map(|e| e.to_string()),
+                })),
+                is_error: Some(true),
+                meta: None,
+            });
+        };
+
+        let mut type_definitions = Vec::new();
+        for loc in locations.into_iter().take(max_results.max(1)) {
+            type_definitions.push(LocationWithSnippet {
+                file_path: loc.file_path,
+                uri: loc.uri,
+                range: loc.range,
+                snippet: None,
+            });
+        }
+
+        let mut warnings = Vec::<Value>::new();
+        if let Some(used) = used_pos.clone()
+            && (used.line != best_guess.line || used.character != best_guess.character)
+        {
+            warnings.push(json!({
+                "kind": "position_fuzzing",
+                "message": "Applied bounded position fuzzing to locate the symbol position.",
+                "input": { "line": args.line, "character": args.character },
+                "used_lsp_position": { "line": used.line, "character": used.character }
+            }));
+        }
+        if let Some(w) = max_total_chars_warning {
+            warnings.push(w);
+        }
+
+        let mut structured_content = json!({
+            "ok": true,
+            "tool": "find_type_definition_at",
+            "server_id": server_id,
+            "input": {
+                "file_path": args.file_path,
+                "line": args.line,
+                "character": args.character,
+                "max_results": max_results,
+                "max_total_chars": max_total_chars
+            },
+            "used_lsp_position": used_pos.map(|p| json!({"line": p.line, "character": p.character})),
+            "type_definition_locations": type_definitions.len(),
+            "type_definitions": type_definitions,
+            "warnings": warnings,
+            "truncated": false
+        });
+        enforce_global_output_caps(max_total_chars, false, &mut structured_content);
+
+        Ok(CallToolResult {
+            content: vec![Content::text(format!(
+                "Found {} type definition locations.",
+                structured_content["type_definition_locations"]
+                    .as_u64()
+                    .unwrap_or(0)
+            ))],
+            structured_content: Some(structured_content),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
+    async fn get_document_symbols(
+        &self,
+        request: CallToolRequestParam,
+    ) -> Result<CallToolResult, McpError> {
+        let args: GetDocumentSymbolsArgs = parse_arguments(request.arguments)?;
+
+        let max_results = args.max_results.unwrap_or(500).clamp(1, 5000);
+        let (max_total_chars, max_total_chars_warning) =
+            effective_max_total_chars(&self.state.config, args.max_total_chars);
+
+        let file_path = PathBuf::from(&args.file_path);
+        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
+
+        let symbols = routed
+            .document_symbols(&abs_file, max_results)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let abs_uri = Url::from_file_path(&abs_file)
+            .ok()
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| format!("file://{}", abs_file.to_string_lossy()));
+
+        let mut out = Vec::new();
+        for s in symbols {
+            let mut value = serde_json::to_value(&s).unwrap_or(Value::Null);
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert(
+                    "document_file_path".to_string(),
+                    Value::String(abs_file.to_string_lossy().to_string()),
+                );
+                obj.insert("document_uri".to_string(), Value::String(abs_uri.clone()));
+                obj.insert("range_1based".to_string(), lsp_range_1based(&s.range));
+                obj.insert(
+                    "selection_range_1based".to_string(),
+                    lsp_range_1based(&s.selection_range),
+                );
+                obj.insert(
+                    "selection_start_1based".to_string(),
+                    lsp_position_1based(&s.selection_range.start),
+                );
+            }
+            out.push(value);
+        }
+
+        let mut warnings = Vec::<Value>::new();
+        if let Some(w) = max_total_chars_warning {
+            warnings.push(w);
+        }
+
+        let mut structured_content = json!({
+            "ok": true,
+            "tool": "get_document_symbols",
+            "server_id": server_id,
+            "input": {
+                "file_path": args.file_path,
+                "max_results": max_results,
+                "max_total_chars": max_total_chars
+            },
+            "symbol_count": out.len(),
+            "symbols": out,
+            "warnings": warnings,
+            "truncated": false
+        });
+        enforce_global_output_caps(max_total_chars, false, &mut structured_content);
+
+        Ok(CallToolResult {
+            content: vec![Content::text(format!(
+                "Found {} document symbols.",
+                structured_content["symbol_count"].as_u64().unwrap_or(0)
+            ))],
+            structured_content: Some(structured_content),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
+    async fn search_workspace_symbols(
+        &self,
+        request: CallToolRequestParam,
+    ) -> Result<CallToolResult, McpError> {
+        let args: SearchWorkspaceSymbolsArgs = parse_arguments(request.arguments)?;
+
+        let max_results = args.max_results.unwrap_or(100).clamp(1, 2000);
+        let (max_total_chars, max_total_chars_warning) =
+            effective_max_total_chars(&self.state.config, args.max_total_chars);
+
+        let routed = if let Some(file_path) = args.file_path.as_deref() {
+            let abs_file = canonicalize_within(&self.state.workspace_root, Path::new(file_path))
+                .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+            self.client_for_file(&abs_file).await?
+        } else if self.state.servers.len() == 1 {
+            let server = self
+                .state
+                .servers
+                .first()
+                .ok_or_else(|| McpError::internal_error("no configured servers", None))?;
+            self.client_for_server(server).await?
+        } else {
+            return Err(McpError::invalid_params(
+                "multiple servers configured; provide file_path to pick a language server",
+                None,
+            ));
+        };
+
+        let server_id = routed.server_id().to_string();
+
+        let matches = routed
+            .workspace_symbols(&args.query, max_results)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let mut out = Vec::new();
+        for m in matches {
+            out.push(json!({
+                "name": m.name,
+                "kind": m.kind,
+                "location": {
+                    "file_path": m.location.file_path,
+                    "uri": m.location.uri,
+                    "range": m.location.range,
+                    "range_1based": lsp_range_1based(&m.location.range)
+                }
+            }));
+        }
+
+        let mut warnings = Vec::<Value>::new();
+        if let Some(w) = max_total_chars_warning {
+            warnings.push(w);
+        }
+
+        let mut structured_content = json!({
+            "ok": true,
+            "tool": "search_workspace_symbols",
+            "server_id": server_id,
+            "input": {
+                "query": args.query,
+                "file_path": args.file_path,
+                "max_results": max_results,
+                "max_total_chars": max_total_chars
+            },
+            "match_count": out.len(),
+            "matches": out,
+            "warnings": warnings,
+            "truncated": false
+        });
+        enforce_global_output_caps(max_total_chars, false, &mut structured_content);
+
+        Ok(CallToolResult {
+            content: vec![Content::text(format!(
+                "Found {} workspace symbol matches.",
+                structured_content["match_count"].as_u64().unwrap_or(0)
             ))],
             structured_content: Some(structured_content),
             is_error: Some(false),
@@ -3257,6 +4070,101 @@ fn tool_find_references_at() -> Tool {
                 "max_snippet_chars": { "type": "integer", "minimum": 40, "default": 400 }
             },
             "required": ["file_path", "line", "character"],
+            "additionalProperties": false
+        }))),
+    )
+}
+
+fn tool_hover_at() -> Tool {
+    Tool::new(
+        Cow::Borrowed("hover_at"),
+        Cow::Borrowed("Get hover information at a specific 1-based position (line/character)."),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 1 },
+                "character": { "type": "integer", "minimum": 1 },
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 }
+            },
+            "required": ["file_path", "line", "character"],
+            "additionalProperties": false
+        }))),
+    )
+}
+
+fn tool_find_implementation_at() -> Tool {
+    Tool::new(
+        Cow::Borrowed("find_implementation_at"),
+        Cow::Borrowed(
+            "Find implementation locations at a specific 1-based position (line/character).",
+        ),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 1 },
+                "character": { "type": "integer", "minimum": 1 },
+                "max_results": { "type": "integer", "minimum": 1, "default": 50 },
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 }
+            },
+            "required": ["file_path", "line", "character"],
+            "additionalProperties": false
+        }))),
+    )
+}
+
+fn tool_find_type_definition_at() -> Tool {
+    Tool::new(
+        Cow::Borrowed("find_type_definition_at"),
+        Cow::Borrowed(
+            "Find type definition locations at a specific 1-based position (line/character).",
+        ),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 1 },
+                "character": { "type": "integer", "minimum": 1 },
+                "max_results": { "type": "integer", "minimum": 1, "default": 50 },
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 }
+            },
+            "required": ["file_path", "line", "character"],
+            "additionalProperties": false
+        }))),
+    )
+}
+
+fn tool_get_document_symbols() -> Tool {
+    Tool::new(
+        Cow::Borrowed("get_document_symbols"),
+        Cow::Borrowed("List document symbols for a file."),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "file_path": { "type": "string" },
+                "max_results": { "type": "integer", "minimum": 1, "default": 500 },
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 }
+            },
+            "required": ["file_path"],
+            "additionalProperties": false
+        }))),
+    )
+}
+
+fn tool_search_workspace_symbols() -> Tool {
+    Tool::new(
+        Cow::Borrowed("search_workspace_symbols"),
+        Cow::Borrowed("Search workspace symbols via the language server."),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string" },
+                "file_path": { "type": "string" },
+                "max_results": { "type": "integer", "minimum": 1, "default": 100 },
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 }
+            },
+            "required": ["query"],
             "additionalProperties": false
         }))),
     )

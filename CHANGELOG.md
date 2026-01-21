@@ -14,9 +14,15 @@ Initial 0.1.0 milestone of `lspi` (Rust workspace), providing an MCP stdio serve
 - Core MCP tools:
   - `find_definition` / `find_definition_at`
   - `find_references` / `find_references_at`
+  - `hover_at`
+  - `find_implementation_at`
+  - `find_type_definition_at`
+  - `get_document_symbols`
+  - `search_workspace_symbols`
   - `rename_symbol` / `rename_symbol_strict`
   - `get_diagnostics`
   - `restart_server`
+  - `stop_server`
 - Rust support via `rust-analyzer` adapter:
   - bounded warmup using `experimental/serverStatus` (best-effort)
   - retries for first-call flakiness (document symbols / definition / references)

@@ -358,6 +358,35 @@ impl LspClient {
             .await
     }
 
+    pub async fn hover(&self, path: &Path, position: LspPosition) -> Result<Value> {
+        let uri = path_to_uri(path)?;
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": position
+        });
+        self.send_request("textDocument/hover", &params, None).await
+    }
+
+    pub async fn implementation(&self, path: &Path, position: LspPosition) -> Result<Value> {
+        let uri = path_to_uri(path)?;
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": position
+        });
+        self.send_request("textDocument/implementation", &params, None)
+            .await
+    }
+
+    pub async fn type_definition(&self, path: &Path, position: LspPosition) -> Result<Value> {
+        let uri = path_to_uri(path)?;
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": position
+        });
+        self.send_request("textDocument/typeDefinition", &params, None)
+            .await
+    }
+
     pub async fn document_diagnostics(
         &self,
         path: &Path,
@@ -420,6 +449,11 @@ impl LspClient {
         }
 
         self.get_cached_diagnostics(path).await
+    }
+
+    pub async fn workspace_symbols(&self, query: &str) -> Result<Value> {
+        let params = serde_json::json!({ "query": query });
+        self.send_request("workspace/symbol", &params, None).await
     }
 
     pub async fn send_request<T: Serialize>(

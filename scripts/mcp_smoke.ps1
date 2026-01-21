@@ -49,7 +49,6 @@ function Assert-NoJsonRpcError($resp, $label) {
 function Get-ToolStructuredContent($resp) {
   if ($null -eq $resp.result) { return $null }
   if ($null -ne $resp.result.structuredContent) { return $resp.result.structuredContent }
-  if ($null -ne $resp.result.structured_content) { return $resp.result.structured_content }
   return $null
 }
 
@@ -346,6 +345,64 @@ try {
   Assert-NoJsonRpcError $diagResp "get_diagnostics"
   Assert-ToolOk $diagResp "get_diagnostics"
   Write-Host ("get_diagnostics => " + ($diagResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
+
+  Write-Host "tools/call hover_at ..." -ForegroundColor Cyan
+  Write-JsonLine $stdin @{
+    jsonrpc = "2.0"
+    id = 9
+    method = "tools/call"
+    params = @{
+      name = "hover_at"
+      arguments = @{
+        file_path = "crates/lspi/src/main.rs"
+        line = $pos.line
+        character = $pos.character
+      }
+    }
+  }
+  $hoverResp = Read-ResponseById $stdout 9 $TimeoutSeconds
+  Assert-NoJsonRpcError $hoverResp "hover_at"
+  Assert-ToolOk $hoverResp "hover_at"
+  Write-Host ("hover_at => " + ($hoverResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
+
+  Write-Host "tools/call get_document_symbols ..." -ForegroundColor Cyan
+  Write-JsonLine $stdin @{
+    jsonrpc = "2.0"
+    id = 10
+    method = "tools/call"
+    params = @{
+      name = "get_document_symbols"
+      arguments = @{
+        file_path = "crates/lspi/src/main.rs"
+        max_results = 2000
+      }
+    }
+  }
+  $symResp = Read-ResponseById $stdout 10 $TimeoutSeconds
+  Assert-NoJsonRpcError $symResp "get_document_symbols"
+  Assert-ToolOk $symResp "get_document_symbols"
+  Write-Host ("get_document_symbols => " + ($symResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
+  $scSyms = Get-ToolStructuredContent $symResp
+  if ($null -eq $scSyms.symbol_count -or $scSyms.symbol_count -lt 1) { throw "get_document_symbols expected symbol_count >= 1" }
+
+  Write-Host "tools/call search_workspace_symbols ..." -ForegroundColor Cyan
+  Write-JsonLine $stdin @{
+    jsonrpc = "2.0"
+    id = 11
+    method = "tools/call"
+    params = @{
+      name = "search_workspace_symbols"
+      arguments = @{
+        query = "run_stdio_with_options"
+        max_results = 50
+        file_path = "crates/lspi/src/main.rs"
+      }
+    }
+  }
+  $wsSymResp = Read-ResponseById $stdout 11 $TimeoutSeconds
+  Assert-NoJsonRpcError $wsSymResp "search_workspace_symbols"
+  Assert-ToolOk $wsSymResp "search_workspace_symbols"
+  Write-Host ("search_workspace_symbols => " + ($wsSymResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
 
   Write-Host "OK" -ForegroundColor Green
 } finally {

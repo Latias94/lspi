@@ -113,6 +113,11 @@ Common environment variables:
 
 - `find_definition`, `find_definition_at`
 - `find_references`, `find_references_at`
+- `hover_at`
+- `find_implementation_at`
+- `find_type_definition_at`
+- `get_document_symbols`
+- `search_workspace_symbols`
 - `rename_symbol`, `rename_symbol_strict`
 - `get_diagnostics`
 - `restart_server`, `stop_server`

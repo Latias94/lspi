@@ -22,6 +22,13 @@ pub struct ReferenceMatch {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceSymbolMatch {
+    pub name: String,
+    pub kind: u32,
+    pub location: ResolvedLocation,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct RenameCandidate {
     pub name: String,
     pub kind: u32,
@@ -93,6 +100,64 @@ pub(crate) fn parse_symbols(value: Value) -> Result<Vec<FlatSymbol>> {
             selection_range: i.location.range,
         })
         .collect())
+}
+
+pub(crate) fn parse_workspace_symbols(value: Value) -> Result<Vec<WorkspaceSymbolMatch>> {
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+
+    let Some(arr) = value.as_array() else {
+        return Err(anyhow!("workspace/symbol response is not an array"));
+    };
+    if arr.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Common case: SymbolInformation[]
+    if let Ok(infos) =
+        serde_json::from_value::<Vec<LspSymbolInformation>>(Value::Array(arr.clone()))
+    {
+        let mut out = Vec::with_capacity(infos.len());
+        for i in infos {
+            if let Ok(location) = to_resolved_location(&i.location) {
+                out.push(WorkspaceSymbolMatch {
+                    name: i.name,
+                    kind: i.kind,
+                    location,
+                });
+            }
+        }
+        return Ok(out);
+    }
+
+    // Fallback: WorkspaceSymbol[] (has `location` field containing a Location).
+    let mut out = Vec::new();
+    for item in arr {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        let Some(name) = obj.get("name").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(kind) = obj.get("kind").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        let Some(loc_val) = obj.get("location") else {
+            continue;
+        };
+
+        let loc: LspLocation = serde_json::from_value(loc_val.clone())
+            .context("failed to parse workspace/symbol location")?;
+        if let Ok(location) = to_resolved_location(&loc) {
+            out.push(WorkspaceSymbolMatch {
+                name: name.to_string(),
+                kind: kind as u32,
+                location,
+            });
+        }
+    }
+    Ok(out)
 }
 
 fn flatten_document_symbol(sym: &LspDocumentSymbol, out: &mut Vec<FlatSymbol>) {

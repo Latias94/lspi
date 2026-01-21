@@ -38,10 +38,16 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
   - `find_definition_at` (by position, with bounded position fuzzing)
   - `find_references` (by name, using document symbols + references; bounded max results)
   - `find_references_at` (by position, with bounded position fuzzing)
+  - `hover_at` (by position, with bounded position fuzzing)
+  - `find_implementation_at` (by position, with bounded position fuzzing; best-effort if not supported)
+  - `find_type_definition_at` (by position, with bounded position fuzzing; best-effort if not supported)
+  - `get_document_symbols` (flat list; includes 1-based ranges)
+  - `search_workspace_symbols` (workspace-wide symbol search; requires disambiguation when multiple servers are configured)
   - `get_diagnostics` (from publishDiagnostics cache; best-effort wait)
   - `rename_symbol` (preview, and apply when `dry_run=false`)
   - `rename_symbol_strict` (position fuzzing + preview/apply)
   - `restart_server` (rust-analyzer only)
+  - `stop_server` (stop language servers; respects lifecycle policies)
 - Safe edit application (current state):
   - optional `expected_before_sha256` precondition
   - backups (suffix configurable)
