@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 This project follows a lightweight variant of "Keep a Changelog". Versions use semantic versioning where practical.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-01-22
 
 Initial 0.1.0 milestone of `lspi` (Rust workspace), providing an MCP stdio server that bridges LSP features for AI coding CLIs (starting with Codex).
 
