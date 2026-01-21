@@ -24,7 +24,7 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
   - TOML/JSON supported with discovery order (CLI `--config`, `LSPI_CONFIG_PATH`, workspace files)
   - CLI supports `lspi mcp --config ... --workspace-root ...`
   - `servers[]` schema supported (with legacy `[rust_analyzer]` compatibility mapping)
-- Multi-server routing by extension/rootDir (ADR 0006) for `rust_analyzer` servers (multiple instances supported)
+- Multi-server routing by extension/rootDir (ADR 0006) for configured servers (multiple instances supported)
 - LSP stdio JSON-RPC transport (minimal)
 - LSP client capabilities:
   - requests hierarchical document symbols (improves selectionRange for name-based tools)
@@ -68,7 +68,9 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
 - Position fuzzing coverage:
   - applied to `rename_symbol_strict`; other tools may need strict variants or shared logic
 - Restart semantics:
-  - supports restarting multiple `rust_analyzer` instances; multiple server kinds still TBD
+  - supports restarting multiple server instances (rust_analyzer, omnisharp)
+- C# (current state):
+  - `omnisharp` adapter supported (LSP mode via `-lsp`), routed by `extensions=["cs"]`
 
 ### Not implemented yet
 

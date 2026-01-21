@@ -23,7 +23,7 @@ Overrides the workspace root used for safety checks and path resolution.
 ```toml
 [[servers]]
 id = "rust-analyzer"               # optional but recommended
-kind = "rust_analyzer"             # required (currently only rust_analyzer is supported)
+kind = "rust_analyzer"             # required (supported: rust_analyzer, omnisharp)
 extensions = ["rs"]                # required (no leading dots)
 # root_dir = "."                   # optional; absolute or relative to workspace_root
 # command = "rust-analyzer"        # optional; defaults to auto-resolve
@@ -44,6 +44,28 @@ If `command` is not set for a `rust_analyzer` server, `lspi` tries:
 - `LSPI_RUST_ANALYZER_COMMAND`
 - `rustup which rust-analyzer`
 - `rust-analyzer` from `PATH`
+
+### C# (OmniSharp) example
+
+`lspi` supports C# via OmniSharp in LSP mode:
+
+```toml
+[[servers]]
+id = "omnisharp"
+kind = "omnisharp"
+extensions = ["cs"]
+# root_dir = "."
+# command = "omnisharp"
+args = ["-lsp"]
+initialize_timeout_ms = 10000
+request_timeout_ms = 30000
+warmup_timeout_ms = 0
+```
+
+If `command` is not set for an `omnisharp` server, `lspi` tries:
+
+- `LSPI_OMNISHARP_COMMAND`
+- `omnisharp` from `PATH`
 
 ### `rust_analyzer` (legacy / optional)
 

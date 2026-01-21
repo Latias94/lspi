@@ -8,6 +8,11 @@ fn is_rust_analyzer_kind(kind: &str) -> bool {
     normalized == "rust_analyzer" || normalized == "rust"
 }
 
+fn is_omnisharp_kind(kind: &str) -> bool {
+    let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
+    normalized == "omnisharp" || normalized == "csharp"
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "lspi")]
 #[command(version)]
@@ -108,6 +113,36 @@ async fn main() -> Result<()> {
 
             for s in servers {
                 if !is_rust_analyzer_kind(&s.kind) {
+                    if is_omnisharp_kind(&s.kind) {
+                        let command = match s.command.as_deref() {
+                            Some(c) if !c.trim().is_empty() => c.to_string(),
+                            _ => lspi_lsp::resolve_omnisharp_command().await?,
+                        };
+
+                        println!(
+                            "server_preflight: id={} kind={} command={}",
+                            s.id, s.kind, command
+                        );
+                        lspi_lsp::preflight_omnisharp(&command).await?;
+
+                        let output = TokioCommand::new(&command).arg("--version").output().await;
+                        if let Ok(output) = output {
+                            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                            if !stdout.is_empty() {
+                                println!("server_version: id={} {stdout}", s.id);
+                            } else if !stderr.is_empty() {
+                                println!("server_version: id={} {stderr}", s.id);
+                            } else {
+                                println!("server_version: id={} <unknown>", s.id);
+                            }
+                        } else {
+                            println!("server_version: id={} <unknown>", s.id);
+                        }
+
+                        continue;
+                    }
+
                     println!(
                         "server_preflight: id={} kind={} <unsupported>",
                         s.id, s.kind
@@ -180,6 +215,18 @@ extensions = ["rs"]
 initialize_timeout_ms = 10000
 request_timeout_ms = 30000
 warmup_timeout_ms = 5000
+
+## C# (OmniSharp) example:
+# [[servers]]
+# id = "omnisharp"
+# kind = "omnisharp"
+# extensions = ["cs"]
+# # root_dir = "."
+# # command = "omnisharp"
+# args = ["-lsp"]
+# initialize_timeout_ms = 10000
+# request_timeout_ms = 30000
+# warmup_timeout_ms = 0
 
 [mcp.output]
 max_total_chars_default = 120000

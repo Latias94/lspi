@@ -80,6 +80,7 @@ impl LspiMcpServer {
                 config: loaded.config,
                 servers,
                 rust_analyzer: Mutex::new(HashMap::new()),
+                omnisharp: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -146,6 +147,7 @@ struct LspiState {
     config: lspi_core::config::LspiConfig,
     servers: Vec<lspi_core::config::ResolvedServerConfig>,
     rust_analyzer: Mutex<HashMap<String, Arc<lspi_lsp::RustAnalyzerClient>>>,
+    omnisharp: Mutex<HashMap<String, Arc<lspi_lsp::OmniSharpClient>>>,
 }
 
 fn lsp_position_1based(pos: &lspi_lsp::LspPosition) -> Value {
@@ -322,11 +324,197 @@ struct RestartServerArgs {
     extensions: Option<Vec<String>>,
 }
 
-impl LspiMcpServer {
-    async fn rust_analyzer_for_file(
+enum RoutedClient {
+    Rust {
+        server_id: String,
+        client: Arc<lspi_lsp::RustAnalyzerClient>,
+    },
+    OmniSharp {
+        server_id: String,
+        client: Arc<lspi_lsp::OmniSharpClient>,
+    },
+}
+
+impl RoutedClient {
+    fn server_id(&self) -> &str {
+        match self {
+            RoutedClient::Rust { server_id, .. } => server_id,
+            RoutedClient::OmniSharp { server_id, .. } => server_id,
+        }
+    }
+
+    async fn find_definition_by_name(
         &self,
-        abs_file: &Path,
-    ) -> Result<(String, Arc<lspi_lsp::RustAnalyzerClient>), McpError> {
+        file_path: &Path,
+        symbol_name: &str,
+        symbol_kind: Option<u32>,
+        max_symbols: usize,
+    ) -> anyhow::Result<Vec<lspi_lsp::DefinitionMatch>> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .find_definition_by_name(file_path, symbol_name, symbol_kind, max_symbols)
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .find_definition_by_name(file_path, symbol_name, symbol_kind, max_symbols)
+                    .await
+            }
+        }
+    }
+
+    async fn definition_at(
+        &self,
+        file_path: &Path,
+        position: lspi_lsp::LspPosition,
+        max_definitions: usize,
+    ) -> anyhow::Result<Vec<lspi_lsp::ResolvedLocation>> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .definition_at(file_path, position, max_definitions)
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .definition_at(file_path, position, max_definitions)
+                    .await
+            }
+        }
+    }
+
+    async fn find_references_by_name(
+        &self,
+        file_path: &Path,
+        symbol_name: &str,
+        symbol_kind: Option<u32>,
+        include_declaration: bool,
+        max_symbols: usize,
+        max_references: usize,
+    ) -> anyhow::Result<Vec<lspi_lsp::ReferenceMatch>> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .find_references_by_name(
+                        file_path,
+                        symbol_name,
+                        symbol_kind,
+                        include_declaration,
+                        max_symbols,
+                        max_references,
+                    )
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .find_references_by_name(
+                        file_path,
+                        symbol_name,
+                        symbol_kind,
+                        include_declaration,
+                        max_symbols,
+                        max_references,
+                    )
+                    .await
+            }
+        }
+    }
+
+    async fn references_at(
+        &self,
+        file_path: &Path,
+        position: lspi_lsp::LspPosition,
+        include_declaration: bool,
+        max_references: usize,
+    ) -> anyhow::Result<(Vec<lspi_lsp::ResolvedLocation>, bool)> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .references_at(file_path, position, include_declaration, max_references)
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .references_at(file_path, position, include_declaration, max_references)
+                    .await
+            }
+        }
+    }
+
+    async fn get_diagnostics(
+        &self,
+        file_path: &Path,
+        max_wait: std::time::Duration,
+    ) -> anyhow::Result<Vec<lspi_lsp::LspDiagnostic>> {
+        match self {
+            RoutedClient::Rust { client, .. } => client.get_diagnostics(file_path, max_wait).await,
+            RoutedClient::OmniSharp { client, .. } => {
+                client.get_diagnostics(file_path, max_wait).await
+            }
+        }
+    }
+
+    async fn list_symbol_candidates(
+        &self,
+        file_path: &Path,
+        symbol_name: &str,
+        symbol_kind: Option<u32>,
+        max_symbols: usize,
+    ) -> anyhow::Result<Vec<lspi_lsp::RenameCandidate>> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .list_symbol_candidates(file_path, symbol_name, symbol_kind, max_symbols)
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .list_symbol_candidates(file_path, symbol_name, symbol_kind, max_symbols)
+                    .await
+            }
+        }
+    }
+
+    async fn rename_at(
+        &self,
+        file_path: &Path,
+        position: lspi_lsp::LspPosition,
+        new_name: &str,
+    ) -> anyhow::Result<std::collections::HashMap<String, Vec<lspi_lsp::LspTextEdit>>> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client.rename_at(file_path, position, new_name).await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client.rename_at(file_path, position, new_name).await
+            }
+        }
+    }
+
+    async fn rename_at_prepared(
+        &self,
+        file_path: &Path,
+        position: lspi_lsp::LspPosition,
+        new_name: &str,
+    ) -> anyhow::Result<std::collections::HashMap<String, Vec<lspi_lsp::LspTextEdit>>> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .rename_at_prepared(file_path, position, new_name)
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .rename_at_prepared(file_path, position, new_name)
+                    .await
+            }
+        }
+    }
+}
+
+impl LspiMcpServer {
+    async fn client_for_file(&self, abs_file: &Path) -> Result<RoutedClient, McpError> {
         let Some(server) = lspi_core::config::route_server_by_path(abs_file, &self.state.servers)
         else {
             let ext = abs_file
@@ -339,22 +527,41 @@ impl LspiMcpServer {
             ));
         };
 
-        if !is_rust_analyzer_kind(&server.kind) {
-            return Err(McpError::invalid_params(
-                format!(
-                    "server kind is not supported yet (only rust_analyzer): id={} kind={}",
-                    server.id, server.kind
-                ),
-                None,
-            ));
+        if is_rust_analyzer_kind(&server.kind) {
+            let client = self.rust_analyzer_for_server(server).await?;
+            return Ok(RoutedClient::Rust {
+                server_id: server.id.clone(),
+                client,
+            });
         }
 
+        if is_omnisharp_kind(&server.kind) {
+            let client = self.omnisharp_for_server(server).await?;
+            return Ok(RoutedClient::OmniSharp {
+                server_id: server.id.clone(),
+                client,
+            });
+        }
+
+        Err(McpError::invalid_params(
+            format!(
+                "server kind is not supported yet: id={} kind={}",
+                server.id, server.kind
+            ),
+            None,
+        ))
+    }
+
+    async fn rust_analyzer_for_server(
+        &self,
+        server: &lspi_core::config::ResolvedServerConfig,
+    ) -> Result<Arc<lspi_lsp::RustAnalyzerClient>, McpError> {
         let existing = {
             let guard = self.state.rust_analyzer.lock().await;
             guard.get(&server.id).cloned()
         };
         if let Some(existing) = existing {
-            return Ok((server.id.clone(), existing));
+            return Ok(existing);
         }
 
         let command = match server.command.as_deref() {
@@ -409,10 +616,90 @@ impl LspiMcpServer {
                     let _ = client.shutdown().await;
                 }
             }
-            return Ok((server.id.clone(), existing));
+            return Ok(existing);
         }
 
-        Ok((server.id.clone(), arc))
+        Ok(arc)
+    }
+
+    async fn omnisharp_for_server(
+        &self,
+        server: &lspi_core::config::ResolvedServerConfig,
+    ) -> Result<Arc<lspi_lsp::OmniSharpClient>, McpError> {
+        let existing = {
+            let guard = self.state.omnisharp.lock().await;
+            guard.get(&server.id).cloned()
+        };
+        if let Some(existing) = existing {
+            return Ok(existing);
+        }
+
+        let command = match server.command.as_deref() {
+            Some(c) if !c.trim().is_empty() => c.to_string(),
+            _ => lspi_lsp::resolve_omnisharp_command()
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+        };
+        lspi_lsp::preflight_omnisharp(&command)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let initialize_timeout = server
+            .initialize_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(|| std::time::Duration::from_secs(10));
+        let request_timeout = server
+            .request_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(|| std::time::Duration::from_secs(30));
+
+        // OmniSharp does not implement rust-analyzer's serverStatus notifications, so a
+        // long per-request warmup wait would be counterproductive. Use a small optional delay
+        // after didOpen instead.
+        let warmup_delay = server
+            .warmup_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(|| std::time::Duration::from_millis(0));
+
+        let args = if server.args.is_empty() {
+            vec!["-lsp".to_string()]
+        } else {
+            server.args.clone()
+        };
+
+        let client = lspi_lsp::OmniSharpClient::start(lspi_lsp::OmniSharpClientOptions {
+            command,
+            args,
+            cwd: server.root_dir.clone(),
+            initialize_timeout,
+            request_timeout,
+            warmup_delay,
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let arc = Arc::new(client);
+
+        let inserted = {
+            let mut guard = self.state.omnisharp.lock().await;
+            if let Some(existing) = guard.get(&server.id) {
+                Some(existing.clone())
+            } else {
+                guard.insert(server.id.clone(), arc.clone());
+                None
+            }
+        };
+
+        if let Some(existing) = inserted {
+            if Arc::strong_count(&arc) == 1 {
+                if let Ok(client) = Arc::try_unwrap(arc) {
+                    let _ = client.shutdown().await;
+                }
+            }
+            return Ok(existing);
+        }
+
+        Ok(arc)
     }
 
     async fn find_definition(
@@ -432,14 +719,15 @@ impl LspiMcpServer {
         let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
-        let (server_id, ra) = self.rust_analyzer_for_file(&abs_file).await?;
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
 
         let kind_num = args
             .symbol_kind
             .as_deref()
             .and_then(lspi_lsp::parse_symbol_kind);
 
-        let matches = ra
+        let matches = routed
             .find_definition_by_name(&abs_file, &args.symbol_name, kind_num, max_results)
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -605,7 +893,8 @@ impl LspiMcpServer {
         let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
-        let (server_id, ra) = self.rust_analyzer_for_file(&abs_file).await?;
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
 
         let file_bytes = tokio::fs::read(&abs_file)
             .await
@@ -636,7 +925,10 @@ impl LspiMcpServer {
                 line: c.line,
                 character: c.character,
             };
-            match ra.definition_at(&abs_file, pos.clone(), max_results).await {
+            match routed
+                .definition_at(&abs_file, pos.clone(), max_results)
+                .await
+            {
                 Ok(d) => {
                     used_pos = Some(pos);
                     if !d.is_empty() {
@@ -791,7 +1083,8 @@ impl LspiMcpServer {
         let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
-        let (server_id, ra) = self.rust_analyzer_for_file(&abs_file).await?;
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
 
         let file_bytes = tokio::fs::read(&abs_file)
             .await
@@ -823,7 +1116,7 @@ impl LspiMcpServer {
                 line: c.line,
                 character: c.character,
             };
-            match ra
+            match routed
                 .references_at(&abs_file, pos.clone(), include_declaration, max_results)
                 .await
             {
@@ -991,14 +1284,15 @@ impl LspiMcpServer {
         let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
-        let (server_id, ra) = self.rust_analyzer_for_file(&abs_file).await?;
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
 
         let kind_num = args
             .symbol_kind
             .as_deref()
             .and_then(lspi_lsp::parse_symbol_kind);
 
-        let matches = ra
+        let matches = routed
             .find_references_by_name(
                 &abs_file,
                 &args.symbol_name,
@@ -1165,9 +1459,10 @@ impl LspiMcpServer {
         let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
-        let (server_id, ra) = self.rust_analyzer_for_file(&abs_file).await?;
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
 
-        let mut diagnostics = ra
+        let mut diagnostics = routed
             .get_diagnostics(&abs_file, std::time::Duration::from_millis(800))
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -1214,14 +1509,15 @@ impl LspiMcpServer {
         let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
-        let (server_id, ra) = self.rust_analyzer_for_file(&abs_file).await?;
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
 
         let kind_num = args
             .symbol_kind
             .as_deref()
             .and_then(lspi_lsp::parse_symbol_kind);
 
-        let candidates = ra
+        let candidates = routed
             .list_symbol_candidates(&abs_file, &args.symbol_name, kind_num, 50)
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -1338,7 +1634,7 @@ impl LspiMcpServer {
             character: candidate.character.saturating_sub(1),
         };
 
-        let changes = ra
+        let changes = routed
             .rename_at(&abs_file, pos, &args.new_name)
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -1410,7 +1706,8 @@ impl LspiMcpServer {
         let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
-        let (server_id, ra) = self.rust_analyzer_for_file(&abs_file).await?;
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
 
         let file_bytes = tokio::fs::read(&abs_file)
             .await
@@ -1443,7 +1740,7 @@ impl LspiMcpServer {
                 line: c.line,
                 character: c.character,
             };
-            match ra
+            match routed
                 .rename_at_prepared(&abs_file, pos.clone(), &args.new_name)
                 .await
             {
@@ -1597,39 +1894,94 @@ impl LspiMcpServer {
         let mut warnings = Vec::<Value>::new();
         let mut busy = Vec::<String>::new();
 
+        let kind_by_id: std::collections::HashMap<String, String> = self
+            .state
+            .servers
+            .iter()
+            .map(|s| (s.id.clone(), s.kind.clone()))
+            .collect();
+
         for id in target_server_ids {
-            let ra_arc = {
-                let mut guard = self.state.rust_analyzer.lock().await;
-                guard.remove(&id)
-            };
+            let kind = kind_by_id.get(&id).cloned().unwrap_or_default();
 
-            let Some(ra_arc) = ra_arc else {
-                warnings.push(json!({
-                    "kind": "server_not_running",
-                    "server_id": id,
-                    "message": "server is not running"
-                }));
-                continue;
-            };
-
-            if Arc::strong_count(&ra_arc) > 1 {
-                let mut guard = self.state.rust_analyzer.lock().await;
-                guard.insert(id.clone(), ra_arc);
-                busy.push(id);
-                continue;
-            }
-
-            match Arc::try_unwrap(ra_arc) {
-                Ok(client) => {
-                    let _ = client.shutdown().await;
-                    restarted.push(id);
-                }
-                Err(arc) => {
+            if is_rust_analyzer_kind(&kind) {
+                let ra_arc = {
                     let mut guard = self.state.rust_analyzer.lock().await;
-                    guard.insert(id.clone(), arc);
+                    guard.remove(&id)
+                };
+
+                let Some(ra_arc) = ra_arc else {
+                    warnings.push(json!({
+                        "kind": "server_not_running",
+                        "server_id": id,
+                        "message": "server is not running"
+                    }));
+                    continue;
+                };
+
+                if Arc::strong_count(&ra_arc) > 1 {
+                    let mut guard = self.state.rust_analyzer.lock().await;
+                    guard.insert(id.clone(), ra_arc);
                     busy.push(id);
+                    continue;
                 }
+
+                match Arc::try_unwrap(ra_arc) {
+                    Ok(client) => {
+                        let _ = client.shutdown().await;
+                        restarted.push(id);
+                    }
+                    Err(arc) => {
+                        let mut guard = self.state.rust_analyzer.lock().await;
+                        guard.insert(id.clone(), arc);
+                        busy.push(id);
+                    }
+                }
+                continue;
             }
+
+            if is_omnisharp_kind(&kind) {
+                let os_arc = {
+                    let mut guard = self.state.omnisharp.lock().await;
+                    guard.remove(&id)
+                };
+
+                let Some(os_arc) = os_arc else {
+                    warnings.push(json!({
+                        "kind": "server_not_running",
+                        "server_id": id,
+                        "message": "server is not running"
+                    }));
+                    continue;
+                };
+
+                if Arc::strong_count(&os_arc) > 1 {
+                    let mut guard = self.state.omnisharp.lock().await;
+                    guard.insert(id.clone(), os_arc);
+                    busy.push(id);
+                    continue;
+                }
+
+                match Arc::try_unwrap(os_arc) {
+                    Ok(client) => {
+                        let _ = client.shutdown().await;
+                        restarted.push(id);
+                    }
+                    Err(arc) => {
+                        let mut guard = self.state.omnisharp.lock().await;
+                        guard.insert(id.clone(), arc);
+                        busy.push(id);
+                    }
+                }
+                continue;
+            }
+
+            warnings.push(json!({
+                "kind": "server_unsupported",
+                "server_id": id,
+                "server_kind": kind,
+                "message": "server kind is not supported yet"
+            }));
         }
 
         for id in &busy {
@@ -1662,6 +2014,11 @@ impl LspiMcpServer {
 fn is_rust_analyzer_kind(kind: &str) -> bool {
     let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
     normalized == "rust_analyzer" || normalized == "rust"
+}
+
+fn is_omnisharp_kind(kind: &str) -> bool {
+    let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
+    normalized == "omnisharp" || normalized == "csharp"
 }
 
 #[derive(Debug, Deserialize, serde::Serialize)]

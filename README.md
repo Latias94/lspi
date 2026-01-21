@@ -2,7 +2,7 @@
 
 `lspi` bridges **Language Server Protocol (LSP)** capabilities to **AI coding CLIs** (starting with Codex) via an **MCP server** over stdio.
 
-Current focus: Rust projects via `rust-analyzer`.
+Current focus: Rust projects via `rust-analyzer` (plus early C# support via OmniSharp LSP mode).
 
 ## Status
 
