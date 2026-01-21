@@ -1,12 +1,30 @@
 param(
   [Parameter(Mandatory = $false)]
-  [string]$WorkspaceRoot = "samples/csharp/Hello",
+  [string]$WorkspaceRoot = "",
+
+  # Optional: path to a .sln or .csproj file (preferred for real projects)
+  [Parameter(Mandatory = $false)]
+  [string]$ProjectPath = "",
 
   [Parameter(Mandatory = $false)]
   [int]$TimeoutSeconds = 180,
 
   [Parameter(Mandatory = $false)]
-  [switch]$SkipIfMissing = $true
+  [switch]$SkipIfMissing = $true,
+
+  # Optional: file (relative to workspace root) used for position-based calls.
+  # If omitted, the script will try to auto-pick a .cs file under the project root.
+  [Parameter(Mandatory = $false)]
+  [string]$TestFile = "",
+
+  # Optional: the needle string to locate the position for definition/references/rename.
+  # If omitted or not found, those position-based steps may be skipped unless -Strict is set.
+  [Parameter(Mandatory = $false)]
+  [string]$Needle = "",
+
+  # If set, missing TestFile/Needle will fail instead of skipping.
+  [Parameter(Mandatory = $false)]
+  [switch]$Strict = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -118,6 +136,41 @@ function Should-Skip($reason) {
   throw $reason
 }
 
+function Resolve-ProjectRoot($workspaceRoot, $projectPath) {
+  if (-not [string]::IsNullOrWhiteSpace($workspaceRoot)) {
+    return (Resolve-Path -LiteralPath $workspaceRoot).Path
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($projectPath)) {
+    $pp = (Resolve-Path -LiteralPath $projectPath).Path
+    if (Test-Path -LiteralPath $pp -PathType Leaf) {
+      return (Split-Path -Parent $pp)
+    }
+    if (Test-Path -LiteralPath $pp -PathType Container) {
+      return $pp
+    }
+    throw "invalid ProjectPath: $projectPath"
+  }
+
+  return (Resolve-Path -LiteralPath "samples/csharp/Hello").Path
+}
+
+function Pick-ProjectFile($projectRoot) {
+  $sln = Get-ChildItem -LiteralPath $projectRoot -Filter *.sln -File -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($null -ne $sln) { return $sln.FullName }
+  $csproj = Get-ChildItem -LiteralPath $projectRoot -Filter *.csproj -File -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($null -ne $csproj) { return $csproj.FullName }
+  return $null
+}
+
+function Pick-CsFile($projectRoot) {
+  $files = Get-ChildItem -LiteralPath $projectRoot -Recurse -Filter *.cs -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch '\\\\(bin|obj)\\\\' } |
+    Select-Object -First 1
+  if ($null -ne $files) { return $files.FullName }
+  return $null
+}
+
 Write-Host "Checking prerequisites..." -ForegroundColor Cyan
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
   Should-Skip "dotnet is not available on PATH"
@@ -134,11 +187,35 @@ if (-not (Test-Path $exe)) {
   throw "missing binary: $exe"
 }
 
-$resolvedWorkspaceRoot = (Resolve-Path -LiteralPath $WorkspaceRoot).Path
-$programPath = Join-Path -Path $resolvedWorkspaceRoot -ChildPath "Program.cs"
-$libPath = Join-Path -Path $resolvedWorkspaceRoot -ChildPath "Lib.cs"
-if (-not (Test-Path $programPath)) { throw "missing Program.cs at $programPath" }
-if (-not (Test-Path $libPath)) { throw "missing Lib.cs at $libPath" }
+$resolvedWorkspaceRoot = Resolve-ProjectRoot $WorkspaceRoot $ProjectPath
+$projectFile = $null
+if (-not [string]::IsNullOrWhiteSpace($ProjectPath)) {
+  $projectFile = (Resolve-Path -LiteralPath $ProjectPath).Path
+} else {
+  $projectFile = Pick-ProjectFile $resolvedWorkspaceRoot
+}
+
+if ($null -ne $projectFile) {
+  Write-Host "Project file: $projectFile" -ForegroundColor DarkGray
+} else {
+  Write-Host "Project file: <not found> (continuing best-effort)" -ForegroundColor DarkGray
+}
+
+$testFileFull = $null
+if (-not [string]::IsNullOrWhiteSpace($TestFile)) {
+  $candidate = Join-Path -Path $resolvedWorkspaceRoot -ChildPath $TestFile
+  if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+    if ($Strict) { throw "TestFile not found: $candidate" }
+    Should-Skip "TestFile not found: $candidate"
+  }
+  $testFileFull = (Resolve-Path -LiteralPath $candidate).Path
+} else {
+  $testFileFull = Pick-CsFile $resolvedWorkspaceRoot
+  if ($null -eq $testFileFull) {
+    if ($Strict) { throw "no .cs files found under: $resolvedWorkspaceRoot" }
+    Should-Skip "no .cs files found under: $resolvedWorkspaceRoot"
+  }
+}
 
 $tmpConfig = Join-Path -Path $env:TEMP -ChildPath ("lspi-csharp-config-" + [Guid]::NewGuid().ToString("N") + ".toml")
 @"
@@ -202,77 +279,92 @@ try {
   $toolsResp = Read-ResponseById $stdout 2 $TimeoutSeconds
   Assert-NoJsonRpcError $toolsResp "tools/list"
 
-  $pos = Find-Position1Based $programPath "Greeter.Greet"
-  Write-Host "Using position for Greeter.Greet: line=$($pos.line) character=$($pos.character)" -ForegroundColor DarkGray
+  $testFileRel = (Resolve-Path -LiteralPath $testFileFull).Path.Substring($resolvedWorkspaceRoot.Length).TrimStart('\','/')
+  $testFileRel = $testFileRel.Replace("\", "/")
+  Write-Host "Test file: $testFileRel" -ForegroundColor DarkGray
 
-  Write-Host "tools/call find_definition_at ..." -ForegroundColor Cyan
-  Write-JsonLine $stdin @{
-    jsonrpc = "2.0"
-    id = 3
-    method = "tools/call"
-    params = @{
-      name = "find_definition_at"
-      arguments = @{
-        file_path = "Program.cs"
-        line = $pos.line
-        character = $pos.character
+  $pos = $null
+  if (-not [string]::IsNullOrWhiteSpace($Needle)) {
+    try {
+      $pos = Find-Position1Based $testFileFull $Needle
+      Write-Host "Using position for needle '$Needle': line=$($pos.line) character=$($pos.character)" -ForegroundColor DarkGray
+    } catch {
+      if ($Strict) { throw $_ }
+      Write-Host "SKIP: needle not found in test file: $Needle" -ForegroundColor Yellow
+      $pos = $null
+    }
+  } else {
+    Write-Host "SKIP: Needle not provided; position-based steps will be skipped (use -Needle ...)" -ForegroundColor Yellow
+  }
+
+  if ($null -ne $pos) {
+    Write-Host "tools/call find_definition_at ..." -ForegroundColor Cyan
+    Write-JsonLine $stdin @{
+      jsonrpc = "2.0"
+      id = 3
+      method = "tools/call"
+      params = @{
+        name = "find_definition_at"
+        arguments = @{
+          file_path = $testFileRel
+          line = $pos.line
+          character = $pos.character
+        }
       }
     }
-  }
-  $defAtResp = Read-ResponseById $stdout 3 $TimeoutSeconds
-  Assert-NoJsonRpcError $defAtResp "find_definition_at"
-  Assert-ToolOk $defAtResp "find_definition_at"
-  $scDefAt = Get-ToolStructuredContent $defAtResp
-  $defAtFiles = @()
-  foreach ($d in $scDefAt.definitions) { $defAtFiles += $d.file_path }
-  if ($scDefAt.definition_locations -lt 1) { throw "find_definition_at expected definition_locations >= 1" }
-  Assert-ContainsWorkspacePath $defAtFiles $resolvedWorkspaceRoot "find_definition_at"
-  Assert-ContainsSubpath $defAtFiles "Lib.cs" "find_definition_at"
+    $defAtResp = Read-ResponseById $stdout 3 $TimeoutSeconds
+    Assert-NoJsonRpcError $defAtResp "find_definition_at"
+    Assert-ToolOk $defAtResp "find_definition_at"
+    $scDefAt = Get-ToolStructuredContent $defAtResp
+    $defAtFiles = @()
+    foreach ($d in $scDefAt.definitions) { $defAtFiles += $d.file_path }
+    if ($scDefAt.definition_locations -lt 1) { throw "find_definition_at expected definition_locations >= 1" }
+    Assert-ContainsWorkspacePath $defAtFiles $resolvedWorkspaceRoot "find_definition_at"
 
-  Write-Host "tools/call find_references_at ..." -ForegroundColor Cyan
-  Write-JsonLine $stdin @{
-    jsonrpc = "2.0"
-    id = 4
-    method = "tools/call"
-    params = @{
-      name = "find_references_at"
-      arguments = @{
-        file_path = "Program.cs"
-        line = $pos.line
-        character = $pos.character
-        max_results = 200
+    Write-Host "tools/call find_references_at ..." -ForegroundColor Cyan
+    Write-JsonLine $stdin @{
+      jsonrpc = "2.0"
+      id = 4
+      method = "tools/call"
+      params = @{
+        name = "find_references_at"
+        arguments = @{
+          file_path = $testFileRel
+          line = $pos.line
+          character = $pos.character
+          max_results = 200
+        }
       }
     }
-  }
-  $refsAtResp = Read-ResponseById $stdout 4 $TimeoutSeconds
-  Assert-NoJsonRpcError $refsAtResp "find_references_at"
-  Assert-ToolOk $refsAtResp "find_references_at"
-  $scRefsAt = Get-ToolStructuredContent $refsAtResp
-  $refFiles = @()
-  foreach ($r in $scRefsAt.references) { $refFiles += $r.file_path }
-  if ($scRefsAt.reference_locations -lt 1) { throw "find_references_at expected reference_locations >= 1" }
-  Assert-ContainsWorkspacePath $refFiles $resolvedWorkspaceRoot "find_references_at"
-  Assert-ContainsSubpath $refFiles "Program.cs" "find_references_at"
+    $refsAtResp = Read-ResponseById $stdout 4 $TimeoutSeconds
+    Assert-NoJsonRpcError $refsAtResp "find_references_at"
+    Assert-ToolOk $refsAtResp "find_references_at"
+    $scRefsAt = Get-ToolStructuredContent $refsAtResp
+    $refFiles = @()
+    foreach ($r in $scRefsAt.references) { $refFiles += $r.file_path }
+    if ($scRefsAt.reference_locations -lt 1) { throw "find_references_at expected reference_locations >= 1" }
+    Assert-ContainsWorkspacePath $refFiles $resolvedWorkspaceRoot "find_references_at"
 
-  Write-Host "tools/call rename_symbol_strict (dry_run=true) ..." -ForegroundColor Cyan
-  Write-JsonLine $stdin @{
-    jsonrpc = "2.0"
-    id = 5
-    method = "tools/call"
-    params = @{
-      name = "rename_symbol_strict"
-      arguments = @{
-        file_path = "Program.cs"
-        line = $pos.line
-        character = $pos.character
-        new_name = "GreetRenamed"
-        dry_run = $true
+    Write-Host "tools/call rename_symbol_strict (dry_run=true) ..." -ForegroundColor Cyan
+    Write-JsonLine $stdin @{
+      jsonrpc = "2.0"
+      id = 5
+      method = "tools/call"
+      params = @{
+        name = "rename_symbol_strict"
+        arguments = @{
+          file_path = $testFileRel
+          line = $pos.line
+          character = $pos.character
+          new_name = "RenamedSymbolTmp"
+          dry_run = $true
+        }
       }
     }
+    $renameResp = Read-ResponseById $stdout 5 $TimeoutSeconds
+    Assert-NoJsonRpcError $renameResp "rename_symbol_strict"
+    Assert-ToolOk $renameResp "rename_symbol_strict"
   }
-  $renameResp = Read-ResponseById $stdout 5 $TimeoutSeconds
-  Assert-NoJsonRpcError $renameResp "rename_symbol_strict"
-  Assert-ToolOk $renameResp "rename_symbol_strict"
 
   Write-Host "tools/call get_diagnostics ..." -ForegroundColor Cyan
   Write-JsonLine $stdin @{
@@ -282,7 +374,7 @@ try {
     params = @{
       name = "get_diagnostics"
       arguments = @{
-        file_path = "Program.cs"
+        file_path = $testFileRel
         max_results = 200
       }
     }

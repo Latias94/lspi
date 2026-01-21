@@ -120,6 +120,19 @@ This repository includes a minimal C# project at `samples/csharp/Hello/` and a s
 pwsh scripts/mcp_smoke_csharp.ps1
 ```
 
+Run against a real solution/project:
+
+```powershell
+pwsh scripts/mcp_smoke_csharp.ps1 -ProjectPath C:\path\to\MySolution.sln
+pwsh scripts/mcp_smoke_csharp.ps1 -ProjectPath C:\path\to\MyProject.csproj
+```
+
+If you want to exercise position-based tools (definition/references/rename), provide a test file and a needle string:
+
+```powershell
+pwsh scripts/mcp_smoke_csharp.ps1 -ProjectPath C:\path\to\MySolution.sln -TestFile src/MyFile.cs -Needle "SomeSymbol"
+```
+
 Prerequisites:
 
 - `dotnet` available on `PATH`
