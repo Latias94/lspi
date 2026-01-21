@@ -23,7 +23,8 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
 - Config loading (ADR 0008):
   - TOML/JSON supported with discovery order (CLI `--config`, `LSPI_CONFIG_PATH`, workspace files)
   - CLI supports `lspi mcp --config ... --workspace-root ...`
-  - `servers[]` schema supported (with legacy `[rust_analyzer]` compatibility mapping)
+  - `servers[]` schema supported
+  - if `servers` is omitted or empty, a default Rust server is assumed
 - Multi-server routing by extension/rootDir (ADR 0006) for configured servers (multiple instances supported)
 - LSP stdio JSON-RPC transport (minimal)
 - LSP client capabilities:

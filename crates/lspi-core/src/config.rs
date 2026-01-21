@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub struct LspiConfig {
     #[serde(default)]
@@ -12,20 +12,7 @@ pub struct LspiConfig {
     #[serde(default)]
     pub servers: Option<Vec<LspServerConfig>>,
     #[serde(default)]
-    pub rust_analyzer: Option<RustAnalyzerConfig>,
-    #[serde(default)]
     pub mcp: Option<McpConfig>,
-}
-
-impl Default for LspiConfig {
-    fn default() -> Self {
-        Self {
-            workspace_root: None,
-            servers: None,
-            rust_analyzer: None,
-            mcp: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,21 +37,6 @@ pub struct LspServerConfig {
     #[serde(default)]
     #[serde(alias = "rootDir")]
     pub root_dir: Option<PathBuf>,
-    #[serde(default)]
-    pub initialize_timeout_ms: Option<u64>,
-    #[serde(default)]
-    pub request_timeout_ms: Option<u64>,
-    #[serde(default)]
-    pub warmup_timeout_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct RustAnalyzerConfig {
-    #[serde(default)]
-    pub command: Option<String>,
-    #[serde(default)]
-    pub args: Option<Vec<String>>,
     #[serde(default)]
     pub initialize_timeout_ms: Option<u64>,
     #[serde(default)]
@@ -133,18 +105,18 @@ pub fn load_config(
         });
     }
 
-    if let Ok(path) = std::env::var("LSPI_CONFIG_PATH") {
-        if !path.trim().is_empty() {
-            let path = PathBuf::from(path);
-            let config = read_config_file(&path)?;
-            let workspace_root =
-                resolve_workspace_root(cli_workspace_root, config.workspace_root.as_deref())?;
-            return Ok(LoadedConfig {
-                config,
-                workspace_root,
-                source: ConfigSource::Env(path),
-            });
-        }
+    if let Ok(path) = std::env::var("LSPI_CONFIG_PATH")
+        && !path.trim().is_empty()
+    {
+        let path = PathBuf::from(path);
+        let config = read_config_file(&path)?;
+        let workspace_root =
+            resolve_workspace_root(cli_workspace_root, config.workspace_root.as_deref())?;
+        return Ok(LoadedConfig {
+            config,
+            workspace_root,
+            source: ConfigSource::Env(path),
+        });
     }
 
     let fallback_root = cli_workspace_root
@@ -176,14 +148,14 @@ pub fn load_config(
 
 fn resolve_workspace_root(cli: Option<&Path>, from_config: Option<&Path>) -> Result<PathBuf> {
     if let Some(cli) = cli {
-        return Ok(cli
+        return cli
             .canonicalize()
-            .with_context(|| format!("failed to canonicalize workspace_root: {cli:?}"))?);
+            .with_context(|| format!("failed to canonicalize workspace_root: {cli:?}"));
     }
     if let Some(cfg) = from_config {
-        return Ok(cfg
+        return cfg
             .canonicalize()
-            .with_context(|| format!("failed to canonicalize workspace_root: {cfg:?}"))?);
+            .with_context(|| format!("failed to canonicalize workspace_root: {cfg:?}"));
     }
     Ok(std::env::current_dir()
         .context("failed to get current_dir")?
@@ -234,10 +206,7 @@ pub fn resolved_servers(config: &LspiConfig, workspace_root: &Path) -> Vec<Resol
             .collect();
     }
 
-    vec![resolve_rust_analyzer_compat(
-        config.rust_analyzer.as_ref(),
-        &workspace_root,
-    )]
+    vec![default_rust_analyzer_server(&workspace_root)]
 }
 
 pub fn route_server_by_path<'a>(
@@ -318,25 +287,17 @@ fn resolve_server_config(
     }
 }
 
-fn resolve_rust_analyzer_compat(
-    rust_analyzer: Option<&RustAnalyzerConfig>,
-    workspace_root: &Path,
-) -> ResolvedServerConfig {
+fn default_rust_analyzer_server(workspace_root: &Path) -> ResolvedServerConfig {
     ResolvedServerConfig {
         id: "rust-analyzer".to_string(),
         kind: "rust_analyzer".to_string(),
-        command: rust_analyzer
-            .and_then(|ra| ra.command.clone())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()),
-        args: rust_analyzer
-            .and_then(|ra| ra.args.clone())
-            .unwrap_or_default(),
+        command: None,
+        args: Vec::new(),
         extensions: vec!["rs".to_string()],
         root_dir: workspace_root.to_path_buf(),
-        initialize_timeout_ms: rust_analyzer.and_then(|ra| ra.initialize_timeout_ms),
-        request_timeout_ms: rust_analyzer.and_then(|ra| ra.request_timeout_ms),
-        warmup_timeout_ms: rust_analyzer.and_then(|ra| ra.warmup_timeout_ms),
+        initialize_timeout_ms: None,
+        request_timeout_ms: None,
+        warmup_timeout_ms: None,
     }
 }
 
@@ -382,8 +343,8 @@ mod tests {
     }
 
     #[test]
-    fn resolved_servers_compat_defaults_to_rust_analyzer() {
-        let root = temp_root("resolved-compat");
+    fn resolved_servers_defaults_to_rust_analyzer() {
+        let root = temp_root("resolved-defaults");
         let root_canon = root.canonicalize().unwrap_or_else(|_| root.clone());
         let config = LspiConfig::default();
         let servers = resolved_servers(&config, &root);

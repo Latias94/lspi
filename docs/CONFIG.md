@@ -67,26 +67,6 @@ If `command` is not set for an `omnisharp` server, `lspi` tries:
 - `LSPI_OMNISHARP_COMMAND`
 - `omnisharp` from `PATH`
 
-### `rust_analyzer` (legacy / optional)
-
-For backward compatibility, `lspi` still accepts:
-
-```toml
-[rust_analyzer]
-command = "rust-analyzer"          # optional
-args = ["--stdio"]                 # optional
-initialize_timeout_ms = 10000      # optional
-request_timeout_ms = 30000         # optional
-warmup_timeout_ms = 5000           # optional
-```
-
-If `servers` is not set, this section is mapped to an implicit `[[servers]]` entry:
-
-- `id = "rust-analyzer"`
-- `kind = "rust_analyzer"`
-- `extensions = ["rs"]`
-- `root_dir = workspace_root` (or current directory)
-
 ### `mcp.output` (optional)
 
 Global output size limits for tool responses.
@@ -112,3 +92,12 @@ lspi setup --workspace-root /path/to/project --write
 # Best-effort detection (Rust/C#) and tailored config:
 lspi setup --workspace-root /path/to/project --wizard --write
 ```
+
+## Defaults
+
+If `servers` is omitted or empty, `lspi` uses a single implicit Rust server:
+
+- `id = "rust-analyzer"`
+- `kind = "rust_analyzer"`
+- `extensions = ["rs"]`
+- `root_dir = workspace_root`
