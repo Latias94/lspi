@@ -1,5 +1,7 @@
 # lspi
 
+Giving AI the sight of LSP.
+
 `lspi` bridges **Language Server Protocol (LSP)** capabilities to **AI coding CLIs** (starting with Codex) via an **MCP server** over stdio.
 
 Current focus:
@@ -104,6 +106,7 @@ Common environment variables:
 - Configuration: `docs/CONFIG.md`
 - Manual smoke test: `docs/SMOKE_TEST.md`
 - Codex integration: `docs/CODEX.md`
+- Agent prompt snippets: `docs/AGENTS_SNIPPETS.md`
 
 ## Tools (MCP)
 

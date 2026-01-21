@@ -47,6 +47,12 @@ Then verify:
 lspi doctor --workspace-root .
 ```
 
+## Recommended: Add an agent prompt snippet
+
+For better tool usage and traceability, add an `lspi` snippet to your project's `AGENTS.md`:
+
+- See `docs/AGENTS_SNIPPETS.md`
+
 ## Per-project configuration (optional)
 
 If you want a project-specific `lspi` configuration, create one of:

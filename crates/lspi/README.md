@@ -1,5 +1,7 @@
 # lspi
 
+Giving AI the sight of LSP.
+
 `lspi` bridges Language Server Protocol (LSP) capabilities to AI coding CLIs (starting with Codex) via an MCP server over stdio.
 
 ## Install
