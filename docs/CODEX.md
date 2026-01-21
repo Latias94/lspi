@@ -33,6 +33,20 @@ Notes:
 - `--workspace-root "."` means “use the current working directory”.
 - Because Codex uses a global config, you should run `codex` from the project root you want to work on.
 
+## Recommended: Generate a project config
+
+From the project root you want to work on:
+
+```bash
+lspi setup --wizard --write
+```
+
+Then verify:
+
+```bash
+lspi doctor --workspace-root .
+```
+
 ## Per-project configuration (optional)
 
 If you want a project-specific `lspi` configuration, create one of:
@@ -57,4 +71,3 @@ See `docs/CONFIG.md` for the full schema and discovery order.
   ```bash
   rustup component add rust-analyzer
   ```
-

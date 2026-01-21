@@ -210,6 +210,7 @@ pub struct LspClient {
     initialized: Notify,
     root_uri: String,
     diagnostic_pull_supported: AtomicU8, // 0=unknown, 1=yes, 2=no
+    default_request_timeout: Duration,
 }
 
 impl LspClient {
@@ -256,6 +257,7 @@ impl LspClient {
                 .map_err(|_| anyhow!("failed to build rootUri for {:?}", options.cwd))?
                 .to_string(),
             diagnostic_pull_supported: AtomicU8::new(0),
+            default_request_timeout: options.request_timeout,
         };
 
         client.spawn_stdout_reader(stdout);
@@ -269,19 +271,8 @@ impl LspClient {
         Ok(client)
     }
 
-    pub fn root_uri(&self) -> &str {
-        &self.root_uri
-    }
-
     pub fn server_status_receiver(&self) -> watch::Receiver<Option<ServerStatus>> {
         self.server_status_rx.clone()
-    }
-
-    pub async fn wait_initialized(&self, max_wait: Duration) -> Result<()> {
-        timeout(max_wait, self.initialized.notified())
-            .await
-            .context("timed out waiting for initialized")?;
-        Ok(())
     }
 
     pub async fn did_open(
@@ -458,7 +449,7 @@ impl LspClient {
         });
         self.write_message(&request).await?;
 
-        let wait = request_timeout.unwrap_or_else(|| Duration::from_secs(30));
+        let wait = request_timeout.unwrap_or(self.default_request_timeout);
         let response_value = timeout(wait, rx)
             .await
             .with_context(|| format!("LSP request timed out: {method}"))?
@@ -585,30 +576,30 @@ async fn handle_lsp_message(
     diagnostics_notify: Arc<Notify>,
 ) {
     if let Some(method) = message.get("method").and_then(|m| m.as_str()) {
-        if method == "experimental/serverStatus" {
-            if let Some(params) = message.get("params") {
-                match serde_json::from_value::<ServerStatusParams>(params.clone()) {
-                    Ok(p) => {
-                        let _ = server_status_tx.send(Some(ServerStatus {
-                            health: p.health,
-                            quiescent: p.quiescent,
-                            message: p.message,
-                        }));
-                    }
-                    Err(err) => warn!("failed to parse serverStatus params: {err:#}"),
+        if method == "experimental/serverStatus"
+            && let Some(params) = message.get("params")
+        {
+            match serde_json::from_value::<ServerStatusParams>(params.clone()) {
+                Ok(p) => {
+                    let _ = server_status_tx.send(Some(ServerStatus {
+                        health: p.health,
+                        quiescent: p.quiescent,
+                        message: p.message,
+                    }));
                 }
+                Err(err) => warn!("failed to parse serverStatus params: {err:#}"),
             }
         }
-        if method == "textDocument/publishDiagnostics" {
-            if let Some(params) = message.get("params") {
-                match serde_json::from_value::<PublishDiagnosticsParams>(params.clone()) {
-                    Ok(p) => {
-                        let mut guard = diagnostics.lock().await;
-                        guard.insert(p.uri, p.diagnostics);
-                        diagnostics_notify.notify_waiters();
-                    }
-                    Err(err) => warn!("failed to parse publishDiagnostics params: {err:#}"),
+        if method == "textDocument/publishDiagnostics"
+            && let Some(params) = message.get("params")
+        {
+            match serde_json::from_value::<PublishDiagnosticsParams>(params.clone()) {
+                Ok(p) => {
+                    let mut guard = diagnostics.lock().await;
+                    guard.insert(p.uri, p.diagnostics);
+                    diagnostics_notify.notify_waiters();
                 }
+                Err(err) => warn!("failed to parse publishDiagnostics params: {err:#}"),
             }
         }
         return;

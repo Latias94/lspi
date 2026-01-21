@@ -486,26 +486,19 @@ fn detect_projects(
                 detected.rust_root.get_or_insert(dir.clone());
             }
 
-            if path
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.eq_ignore_ascii_case("sln"))
-                .unwrap_or(false)
+            let ext = path.extension().and_then(|s| s.to_str());
+            if detected.csharp_root.is_none()
+                && ext.map(|s| s.eq_ignore_ascii_case("sln")).unwrap_or(false)
             {
-                if detected.csharp_root.is_none() {
-                    detected.csharp_root = Some(dir.clone());
-                    detected.csharp_kind = Some("sln");
-                }
-            } else if path
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.eq_ignore_ascii_case("csproj"))
-                .unwrap_or(false)
+                detected.csharp_root = Some(dir.clone());
+                detected.csharp_kind = Some("sln");
+            } else if detected.csharp_root.is_none()
+                && ext
+                    .map(|s| s.eq_ignore_ascii_case("csproj"))
+                    .unwrap_or(false)
             {
-                if detected.csharp_root.is_none() {
-                    detected.csharp_root = Some(dir.clone());
-                    detected.csharp_kind = Some("csproj");
-                }
+                detected.csharp_root = Some(dir.clone());
+                detected.csharp_kind = Some("csproj");
             }
 
             if detected.rust_root.is_some() && detected.csharp_root.is_some() {

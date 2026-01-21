@@ -29,10 +29,10 @@ pub struct OmniSharpClientOptions {
 }
 
 pub async fn resolve_omnisharp_command() -> Result<String> {
-    if let Ok(value) = std::env::var("LSPI_OMNISHARP_COMMAND") {
-        if !value.trim().is_empty() {
-            return Ok(value);
-        }
+    if let Ok(value) = std::env::var("LSPI_OMNISHARP_COMMAND")
+        && !value.trim().is_empty()
+    {
+        return Ok(value);
     }
     Ok("omnisharp".to_string())
 }

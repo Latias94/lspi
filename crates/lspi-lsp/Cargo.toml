@@ -2,6 +2,12 @@
 name = "lspi-lsp"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+description = "LSP client adapters used by lspi."
 
 [dependencies]
 anyhow.workspace = true

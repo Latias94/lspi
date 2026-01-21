@@ -611,10 +611,10 @@ impl LspiMcpServer {
         };
 
         if let Some(existing) = inserted {
-            if Arc::strong_count(&arc) == 1 {
-                if let Ok(client) = Arc::try_unwrap(arc) {
-                    let _ = client.shutdown().await;
-                }
+            if Arc::strong_count(&arc) == 1
+                && let Ok(client) = Arc::try_unwrap(arc)
+            {
+                let _ = client.shutdown().await;
             }
             return Ok(existing);
         }
@@ -691,10 +691,10 @@ impl LspiMcpServer {
         };
 
         if let Some(existing) = inserted {
-            if Arc::strong_count(&arc) == 1 {
-                if let Ok(client) = Arc::try_unwrap(arc) {
-                    let _ = client.shutdown().await;
-                }
+            if Arc::strong_count(&arc) == 1
+                && let Ok(client) = Arc::try_unwrap(arc)
+            {
+                let _ = client.shutdown().await;
             }
             return Ok(existing);
         }
@@ -1003,15 +1003,15 @@ impl LspiMcpServer {
         }
 
         let mut warnings = Vec::<Value>::new();
-        if let Some(used) = used_pos.clone() {
-            if used.line != best_guess.line || used.character != best_guess.character {
-                warnings.push(json!({
-                    "kind": "position_fuzzing",
-                    "message": "Applied bounded position fuzzing to locate the symbol position.",
-                    "input": { "line": args.line, "character": args.character },
-                    "used_lsp_position": { "line": used.line, "character": used.character }
-                }));
-            }
+        if let Some(used) = used_pos.clone()
+            && (used.line != best_guess.line || used.character != best_guess.character)
+        {
+            warnings.push(json!({
+                "kind": "position_fuzzing",
+                "message": "Applied bounded position fuzzing to locate the symbol position.",
+                "input": { "line": args.line, "character": args.character },
+                "used_lsp_position": { "line": used.line, "character": used.character }
+            }));
         }
         if include_snippet && snippet_skipped > 0 {
             warnings.push(json!({
@@ -1195,15 +1195,15 @@ impl LspiMcpServer {
         }
 
         let mut warnings = Vec::<Value>::new();
-        if let Some(used) = used_pos.clone() {
-            if used.line != best_guess.line || used.character != best_guess.character {
-                warnings.push(json!({
-                    "kind": "position_fuzzing",
-                    "message": "Applied bounded position fuzzing to locate the symbol position.",
-                    "input": { "line": args.line, "character": args.character },
-                    "used_lsp_position": { "line": used.line, "character": used.character }
-                }));
-            }
+        if let Some(used) = used_pos.clone()
+            && (used.line != best_guess.line || used.character != best_guess.character)
+        {
+            warnings.push(json!({
+                "kind": "position_fuzzing",
+                "message": "Applied bounded position fuzzing to locate the symbol position.",
+                "input": { "line": args.line, "character": args.character },
+                "used_lsp_position": { "line": used.line, "character": used.character }
+            }));
         }
         if limited_by_max_results {
             warnings.push(json!({
@@ -1776,15 +1776,15 @@ impl LspiMcpServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         let mut warnings = Vec::<Value>::new();
-        if let Some(used) = used_pos {
-            if used.line != best_guess.line || used.character != best_guess.character {
-                warnings.push(json!({
-                    "kind": "position_fuzzing",
-                    "message": "Applied bounded position fuzzing to locate the symbol position.",
-                    "input": { "line": args.line, "character": args.character },
-                    "used_lsp_position": { "line": used.line, "character": used.character }
-                }));
-            }
+        if let Some(used) = used_pos
+            && (used.line != best_guess.line || used.character != best_guess.character)
+        {
+            warnings.push(json!({
+                "kind": "position_fuzzing",
+                "message": "Applied bounded position fuzzing to locate the symbol position.",
+                "input": { "line": args.line, "character": args.character },
+                "used_lsp_position": { "line": used.line, "character": used.character }
+            }));
         }
 
         if !dry_run {
@@ -2133,7 +2133,6 @@ async fn apply_workspace_edit(
     })?;
 
     struct FileState {
-        uri: String,
         path: PathBuf,
         original_bytes: Vec<u8>,
         backup_path: Option<PathBuf>,
@@ -2200,7 +2199,6 @@ async fn apply_workspace_edit(
         }
 
         files.push(FileState {
-            uri: uri.clone(),
             path: canonical,
             original_bytes,
             backup_path: None,
@@ -2316,16 +2314,14 @@ fn enforce_global_output_caps(max_total_chars: usize, include_snippet: bool, pay
     let mut changed = false;
 
     // 1) Drop snippets (cheap win).
-    if include_snippet {
-        if let Some(results) = payload.get_mut("results") {
-            strip_snippets(results);
-            warnings.push(json!({
-                "kind": "global_cap_dropped_snippet",
-                "message": "Dropped snippets to satisfy max_total_chars.",
-                "max_total_chars": max_total_chars
-            }));
-            changed = true;
-        }
+    if include_snippet && let Some(results) = payload.get_mut("results") {
+        strip_snippets(results);
+        warnings.push(json!({
+            "kind": "global_cap_dropped_snippet",
+            "message": "Dropped snippets to satisfy max_total_chars.",
+            "max_total_chars": max_total_chars
+        }));
+        changed = true;
     }
 
     // 2) Truncate the main arrays until size is below cap.
@@ -2346,7 +2342,7 @@ fn enforce_global_output_caps(max_total_chars: usize, include_snippet: bool, pay
                             .get_mut("diagnostics")
                             .and_then(|v| v.as_array_mut())
                             .unwrap();
-                        diags.truncate((len + 1) / 2);
+                        diags.truncate(len.div_ceil(2));
                     }
                     changed = true;
                 }
@@ -2368,7 +2364,7 @@ fn enforce_global_output_caps(max_total_chars: usize, include_snippet: bool, pay
                     if total_locations <= 1 {
                         break;
                     }
-                    let target = (total_locations + 1) / 2;
+                    let target = total_locations.div_ceil(2);
                     {
                         let results = payload
                             .get_mut("results")
@@ -2385,21 +2381,21 @@ fn enforce_global_output_caps(max_total_chars: usize, include_snippet: bool, pay
                     .map(|results| count_locations(results.as_slice()))
                     .unwrap_or(0);
 
-                if tool == "find_definition" {
-                    if let Some(obj) = payload.as_object_mut() {
-                        obj.insert(
-                            "definition_locations".to_string(),
-                            Value::Number(serde_json::Number::from(total)),
-                        );
-                    }
+                if tool == "find_definition"
+                    && let Some(obj) = payload.as_object_mut()
+                {
+                    obj.insert(
+                        "definition_locations".to_string(),
+                        Value::Number(serde_json::Number::from(total)),
+                    );
                 }
-                if tool == "find_references" {
-                    if let Some(obj) = payload.as_object_mut() {
-                        obj.insert(
-                            "reference_locations".to_string(),
-                            Value::Number(serde_json::Number::from(total)),
-                        );
-                    }
+                if tool == "find_references"
+                    && let Some(obj) = payload.as_object_mut()
+                {
+                    obj.insert(
+                        "reference_locations".to_string(),
+                        Value::Number(serde_json::Number::from(total)),
+                    );
                 }
             }
             _ => {}
@@ -2420,11 +2416,9 @@ fn enforce_global_output_caps(max_total_chars: usize, include_snippet: bool, pay
         changed = true;
     }
 
-    if changed {
-        if let Some(obj) = payload.as_object_mut() {
-            obj.insert("warnings".to_string(), Value::Array(warnings));
-            obj.insert("truncated".to_string(), Value::Bool(true));
-        }
+    if changed && let Some(obj) = payload.as_object_mut() {
+        obj.insert("warnings".to_string(), Value::Array(warnings));
+        obj.insert("truncated".to_string(), Value::Bool(true));
     }
 }
 

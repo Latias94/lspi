@@ -83,24 +83,17 @@ pub fn candidate_lsp_positions(
             let line_utf16_len = utf16_len(line_text);
 
             // 4) Character base candidates: raw, scalar-index interpreted, byte-index interpreted.
-            let mut base_chars = Vec::<u32>::new();
-            base_chars.push(input_character.saturating_sub(1));
-            base_chars.push(input_character);
-
-            base_chars.push(utf16_units_for_scalar_index(
-                line_text,
+            let mut base_chars = vec![
                 input_character.saturating_sub(1),
-            ));
-            base_chars.push(utf16_units_for_scalar_index(line_text, input_character));
-
-            base_chars.push(utf16_units_for_byte_offset(
-                line_text,
-                (input_character.saturating_sub(1)) as usize,
-            ));
-            base_chars.push(utf16_units_for_byte_offset(
-                line_text,
-                input_character as usize,
-            ));
+                input_character,
+                utf16_units_for_scalar_index(line_text, input_character.saturating_sub(1)),
+                utf16_units_for_scalar_index(line_text, input_character),
+                utf16_units_for_byte_offset(
+                    line_text,
+                    (input_character.saturating_sub(1)) as usize,
+                ),
+                utf16_units_for_byte_offset(line_text, input_character as usize),
+            ];
 
             base_chars.sort_unstable();
             base_chars.dedup();
@@ -187,14 +180,12 @@ fn utf16_len(text: &str) -> u32 {
 }
 
 fn utf16_units_for_scalar_index(text: &str, scalar_index: u32) -> u32 {
-    let mut scalars = 0u32;
     let mut units = 0u32;
-    for ch in text.chars() {
-        if scalars >= scalar_index {
+    for (idx, ch) in text.chars().enumerate() {
+        if (idx as u32) >= scalar_index {
             break;
         }
         units = units.saturating_add(ch.len_utf16() as u32);
-        scalars += 1;
     }
     units
 }

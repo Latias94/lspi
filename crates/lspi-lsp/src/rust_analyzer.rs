@@ -30,10 +30,10 @@ pub struct RustAnalyzerClientOptions {
 }
 
 pub async fn resolve_rust_analyzer_command() -> Result<String> {
-    if let Ok(value) = std::env::var("LSPI_RUST_ANALYZER_COMMAND") {
-        if !value.trim().is_empty() {
-            return Ok(value);
-        }
+    if let Ok(value) = std::env::var("LSPI_RUST_ANALYZER_COMMAND")
+        && !value.trim().is_empty()
+    {
+        return Ok(value);
     }
 
     // If the user installed rust-analyzer via rustup component, rustup can tell us the actual path.
@@ -42,12 +42,12 @@ pub async fn resolve_rust_analyzer_command() -> Result<String> {
         .output()
         .await;
 
-    if let Ok(output) = output {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Ok(path);
-            }
+    if let Ok(output) = output
+        && output.status.success()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Ok(path);
         }
     }
 
@@ -98,7 +98,6 @@ pub struct RustAnalyzerClient {
     lsp: LspClient,
     open_files: Mutex<HashMap<PathBuf, OpenFileState>>,
     status_rx: tokio::sync::watch::Receiver<Option<ServerStatus>>,
-    request_timeout: Duration,
     warmup_timeout: Duration,
 }
 
@@ -125,7 +124,6 @@ impl RustAnalyzerClient {
             lsp,
             open_files: Mutex::new(HashMap::new()),
             status_rx,
-            request_timeout: options.request_timeout,
             warmup_timeout: options.warmup_timeout,
         })
     }
@@ -139,10 +137,10 @@ impl RustAnalyzerClient {
         let deadline = tokio::time::Instant::now() + self.warmup_timeout;
 
         loop {
-            if let Some(status) = rx.borrow().clone() {
-                if status.quiescent {
-                    return Ok(Some(status));
-                }
+            if let Some(status) = rx.borrow().clone()
+                && status.quiescent
+            {
+                return Ok(Some(status));
             }
 
             let now = tokio::time::Instant::now();
@@ -258,13 +256,13 @@ impl RustAnalyzerClient {
         self.open_or_sync(file_path, "rust").await?;
 
         // For a better first-call experience, wait (bounded) for rust-analyzer to settle.
-        if let Some(status) = self.wait_quiescent().await? {
-            if !status.quiescent {
-                warn!(
-                    "rust-analyzer not quiescent yet: health={} message={:?}",
-                    status.health, status.message
-                );
-            }
+        if let Some(status) = self.wait_quiescent().await?
+            && !status.quiescent
+        {
+            warn!(
+                "rust-analyzer not quiescent yet: health={} message={:?}",
+                status.health, status.message
+            );
         }
 
         let symbols = self.document_symbols_with_retry(file_path).await?;
@@ -308,13 +306,13 @@ impl RustAnalyzerClient {
     ) -> Result<Vec<ResolvedLocation>> {
         self.open_or_sync(file_path, "rust").await?;
 
-        if let Some(status) = self.wait_quiescent().await? {
-            if !status.quiescent {
-                warn!(
-                    "rust-analyzer not quiescent yet: health={} message={:?}",
-                    status.health, status.message
-                );
-            }
+        if let Some(status) = self.wait_quiescent().await?
+            && !status.quiescent
+        {
+            warn!(
+                "rust-analyzer not quiescent yet: health={} message={:?}",
+                status.health, status.message
+            );
         }
 
         let defs = self
@@ -340,13 +338,13 @@ impl RustAnalyzerClient {
     ) -> Result<(Vec<ResolvedLocation>, bool)> {
         self.open_or_sync(file_path, "rust").await?;
 
-        if let Some(status) = self.wait_quiescent().await? {
-            if !status.quiescent {
-                warn!(
-                    "rust-analyzer not quiescent yet: health={} message={:?}",
-                    status.health, status.message
-                );
-            }
+        if let Some(status) = self.wait_quiescent().await?
+            && !status.quiescent
+        {
+            warn!(
+                "rust-analyzer not quiescent yet: health={} message={:?}",
+                status.health, status.message
+            );
         }
 
         let refs = self
@@ -380,13 +378,13 @@ impl RustAnalyzerClient {
     ) -> Result<Vec<ReferenceMatch>> {
         self.open_or_sync(file_path, "rust").await?;
 
-        if let Some(status) = self.wait_quiescent().await? {
-            if !status.quiescent {
-                warn!(
-                    "rust-analyzer not quiescent yet: health={} message={:?}",
-                    status.health, status.message
-                );
-            }
+        if let Some(status) = self.wait_quiescent().await?
+            && !status.quiescent
+        {
+            warn!(
+                "rust-analyzer not quiescent yet: health={} message={:?}",
+                status.health, status.message
+            );
         }
 
         let symbols = self.document_symbols_with_retry(file_path).await?;

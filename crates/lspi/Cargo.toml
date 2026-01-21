@@ -2,6 +2,27 @@
 name = "lspi"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Bridge LSP capabilities to AI coding CLIs via an MCP server over stdio."
+readme = "README.md"
+keywords = ["lsp", "mcp", "codex", "ai", "cli"]
+categories = ["command-line-utilities", "development-tools", "asynchronous"]
+
+[package.metadata.binstall]
+# `cargo-binstall` provides `{ repo }` as a full URL (e.g. https://github.com/OWNER/REPO),
+# and our cargo-dist release assets are named like `{ name }-{ target }.tar.xz` under the `v{ version }` tag,
+# with binaries located under the top-level directory `{ name }-{ target }/`.
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.xz"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.zip"
+pkg-fmt = "zip"
+bin-dir = "{ bin }{ binary-ext }"
 
 [dependencies]
 anyhow.workspace = true

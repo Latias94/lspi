@@ -2,6 +2,12 @@
 name = "lspi-mcp"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+description = "MCP server implementation for lspi."
 
 [dependencies]
 anyhow.workspace = true
