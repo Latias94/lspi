@@ -10,6 +10,7 @@ Current focus:
 - C# via OmniSharp (`omnisharp -lsp`)
 - Generic stdio LSP (`kind = "generic"`, experimental)
 - TypeScript via `typescript-language-server` (through `kind = "generic"`)
+- Go via `gopls` (through `kind = "generic"`)
 
 ## Status
 

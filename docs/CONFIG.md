@@ -93,6 +93,20 @@ Notes:
 - `language_id` controls the `textDocument/didOpen` languageId. If omitted, `lspi` guesses from the first extension.
 - For `kind = "generic"`, `command` is required (no auto-resolve).
 
+### Generic LSP example (Go / gopls)
+
+```toml
+[[servers]]
+id = "go"
+kind = "generic"
+extensions = ["go"]
+language_id = "go"
+command = "gopls"
+args = ["serve"]
+initialize_timeout_ms = 20000
+request_timeout_ms = 30000
+```
+
 ### Lifecycle options (optional)
 
 These options control how `lspi` manages long-running language server processes:

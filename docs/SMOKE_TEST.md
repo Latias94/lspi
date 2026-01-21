@@ -174,3 +174,29 @@ Notes:
 
 - The script defaults to `-SkipIfMissing` so it does not fail if prerequisites are missing.
 - If your project has `package.json` but no `node_modules`, either run `npm install` first or pass `-InstallDeps`.
+
+## Go (generic LSP) smoke test
+
+This repository includes a minimal Go module at `samples/go/Hello/` and a smoke script:
+
+```powershell
+pwsh scripts/mcp_smoke_go.ps1
+```
+
+Run against a real Go module/repo:
+
+```powershell
+pwsh scripts/mcp_smoke_go.ps1 -WorkspaceRoot C:\path\to\my-go-project
+```
+
+Prerequisites (best-effort):
+
+- `go` available on `PATH`
+- `gopls` available on `PATH`
+
+Notes:
+
+- The script defaults to `-SkipIfMissing` so it does not fail if prerequisites are missing.
+- If `gopls` is missing, you can install it with:
+  - `go install golang.org/x/tools/gopls@latest`
+  - or run the script with `-InstallGopls` (best-effort).
