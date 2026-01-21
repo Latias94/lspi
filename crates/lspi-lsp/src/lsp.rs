@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -208,6 +209,7 @@ pub struct LspClient {
     server_status_rx: watch::Receiver<Option<ServerStatus>>,
     initialized: Notify,
     root_uri: String,
+    diagnostic_pull_supported: AtomicU8, // 0=unknown, 1=yes, 2=no
 }
 
 impl LspClient {
@@ -253,6 +255,7 @@ impl LspClient {
             root_uri: Url::from_directory_path(&options.cwd)
                 .map_err(|_| anyhow!("failed to build rootUri for {:?}", options.cwd))?
                 .to_string(),
+            diagnostic_pull_supported: AtomicU8::new(0),
         };
 
         client.spawn_stdout_reader(stdout);
@@ -362,6 +365,41 @@ impl LspClient {
         });
         self.send_request("textDocument/rename", &params, None)
             .await
+    }
+
+    pub async fn document_diagnostics(
+        &self,
+        path: &Path,
+        request_timeout: Duration,
+    ) -> Result<Option<Vec<LspDiagnostic>>> {
+        if self.diagnostic_pull_supported.load(Ordering::Relaxed) == 2 {
+            return Ok(None);
+        }
+
+        let uri = path_to_uri(path)?;
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "identifier": null,
+            "previousResultId": null
+        });
+
+        match self
+            .send_request("textDocument/diagnostic", &params, Some(request_timeout))
+            .await
+        {
+            Ok(value) => {
+                self.diagnostic_pull_supported.store(1, Ordering::Relaxed);
+                parse_document_diagnostic_report(value).map(Some)
+            }
+            Err(err) => {
+                let msg = err.to_string().to_ascii_lowercase();
+                if msg.contains("-32601") || msg.contains("method not found") {
+                    self.diagnostic_pull_supported.store(2, Ordering::Relaxed);
+                    return Ok(None);
+                }
+                Err(err)
+            }
+        }
     }
 
     pub async fn get_cached_diagnostics(&self, path: &Path) -> Result<Vec<LspDiagnostic>> {
@@ -522,6 +560,21 @@ impl LspClient {
             }
         });
     }
+}
+
+fn parse_document_diagnostic_report(value: Value) -> Result<Vec<LspDiagnostic>> {
+    // DocumentDiagnosticReport: { kind: "full", items: Diagnostic[] } or { kind: "unchanged" }.
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+
+    let Some(items) = value.get("items").and_then(|v| v.as_array()) else {
+        return Ok(Vec::new());
+    };
+
+    let diags: Vec<LspDiagnostic> = serde_json::from_value(Value::Array(items.clone()))
+        .context("failed to parse Diagnostic[]")?;
+    Ok(diags)
 }
 
 async fn handle_lsp_message(

@@ -356,6 +356,10 @@ impl OmniSharpClient {
         max_wait: Duration,
     ) -> Result<Vec<LspDiagnostic>> {
         self.open_or_sync(file_path, "csharp").await?;
+        if let Some(diags) = self.lsp.document_diagnostics(file_path, max_wait).await? {
+            return Ok(diags);
+        }
+
         self.lsp
             .wait_for_diagnostics_update(file_path, max_wait)
             .await

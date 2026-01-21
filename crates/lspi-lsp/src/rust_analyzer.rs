@@ -445,6 +445,11 @@ impl RustAnalyzerClient {
     ) -> Result<Vec<LspDiagnostic>> {
         self.open_or_sync(file_path, "rust").await?;
         let _ = self.wait_quiescent().await?;
+
+        if let Some(diags) = self.lsp.document_diagnostics(file_path, max_wait).await? {
+            return Ok(diags);
+        }
+
         self.lsp
             .wait_for_diagnostics_update(file_path, max_wait)
             .await

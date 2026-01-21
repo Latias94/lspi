@@ -71,6 +71,8 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
   - supports restarting multiple server instances (rust_analyzer, omnisharp)
 - C# (current state):
   - `omnisharp` adapter supported (LSP mode via `-lsp`), routed by `extensions=["cs"]`
+- Diagnostics (current state):
+  - `get_diagnostics` tries `textDocument/diagnostic` (pull) when supported, falls back to publishDiagnostics cache
 
 ### Not implemented yet
 
