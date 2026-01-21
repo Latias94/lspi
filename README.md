@@ -61,7 +61,7 @@ Run `lspi doctor --workspace-root .` for best-effort checks and hints.
 
 ```bash
 cd /path/to/project
-lspi setup --wizard --write
+lspi setup --wizard --non-interactive --write
 ```
 
 2) Check dependencies:
@@ -108,6 +108,42 @@ Common environment variables:
 - Manual smoke test: `docs/SMOKE_TEST.md`
 - Codex integration: `docs/CODEX.md`
 - Agent prompt snippets: `docs/AGENTS_SNIPPETS.md`
+- Codex skill (optional): `.codex/skills/lspi/SKILL.md`
+
+## Codex Skill (Optional)
+
+Codex supports "skills" discovered from:
+
+- Repo-scoped: `<repo>/.codex/skills/**/SKILL.md`
+- User-scoped: `$CODEX_HOME/skills/**/SKILL.md` (usually `~/.codex/skills`)
+
+This repo ships a ready-to-use skill at `.codex/skills/lspi/`.
+
+### Option A: Use repo-scoped skill
+
+- If your project repo includes `.codex/skills/lspi/`, Codex can discover it when you run `codex` from that repo.
+
+### Option B: Install the skill globally (recommended)
+
+Copy (or symlink) this directory to your Codex skills folder:
+
+- `~/.codex/skills/lspi/`
+
+Example (macOS/Linux):
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R .codex/skills/lspi ~/.codex/skills/
+```
+
+Example (PowerShell):
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$HOME\\.codex\\skills" | Out-Null
+Copy-Item -Recurse -Force ".codex\\skills\\lspi" "$HOME\\.codex\\skills\\"
+```
+
+Note: installing `lspi` via `cargo install` does not install this skill; it's just optional prompt metadata.
 
 ## Tools (MCP)
 

@@ -2,6 +2,27 @@
 
 This document shows how to connect `lspi` to Codex as an MCP server.
 
+## Recommended: Generate a project config first
+
+From the project root you want to work on:
+
+```bash
+lspi setup --wizard --non-interactive --write
+```
+
+Then verify:
+
+```bash
+lspi doctor --workspace-root .
+```
+
+Notes:
+
+- `--wizard` does a best-effort scan for Rust/C# projects and generates matching `[[servers]]`.
+- The default is non-interactive unless you explicitly pass `--interactive`.
+- If you prefer the minimal Rust-only template, use:
+  - `lspi setup --write`
+
 ## Recommended: Install `lspi` once
 
 From the `lspi` repo root:
@@ -33,26 +54,56 @@ Notes:
 - `--workspace-root "."` means “use the current working directory”.
 - Because Codex uses a global config, you should run `codex` from the project root you want to work on.
 - Optional: add `--warmup` to reduce first-tool-call latency by starting language servers eagerly.
+- If you keep `lspi` config outside the workspace, pass it explicitly:
+  - `args = ["mcp", "--workspace-root", ".", "--config", "/path/to/lspi.toml"]`
 
-## Recommended: Generate a project config
+## Recommended: Add agent instructions (two options)
 
-From the project root you want to work on:
-
-```bash
-lspi setup --wizard --write
-```
-
-Then verify:
-
-```bash
-lspi doctor --workspace-root .
-```
-
-## Recommended: Add an agent prompt snippet
+### Option A: Add an `AGENTS.md` snippet (works for any agent)
 
 For better tool usage and traceability, add an `lspi` snippet to your project's `AGENTS.md`:
 
 - See `docs/AGENTS_SNIPPETS.md`
+
+### Option B: Install a Codex Skill (Codex-specific)
+
+Codex can load repo-scoped skills from `.codex/skills/**/SKILL.md` or user-scoped skills from `$CODEX_HOME/skills/**/SKILL.md` (usually `~/.codex/skills`).
+
+This repository includes a ready-to-use skill at:
+
+- `.codex/skills/lspi/SKILL.md`
+
+To install it globally (so Codex can use it in any repo), copy (or symlink) this directory to:
+
+- `~/.codex/skills/lspi/`
+
+Then, in Codex, ask it to use the `lspi` skill (or select it in a UI that supports skills).
+
+If you prefer repo-scoped installation (per project), copy the folder into your project repo:
+
+- `<your-project>/.codex/skills/lspi/`
+
+Example (macOS/Linux):
+
+```bash
+mkdir -p /path/to/your-project/.codex/skills
+cp -R /path/to/lspi/.codex/skills/lspi /path/to/your-project/.codex/skills/
+```
+
+Example (PowerShell):
+
+```powershell
+New-Item -ItemType Directory -Force -Path "C:\\path\\to\\your-project\\.codex\\skills" | Out-Null
+Copy-Item -Recurse -Force "C:\\path\\to\\lspi\\.codex\\skills\\lspi" "C:\\path\\to\\your-project\\.codex\\skills\\"
+```
+
+## Tool usage notes (important)
+
+- All `*_at` tools use **1-based** `line` / `character`.
+- Prefer `*_at` tools when you have a cursor/position: they apply bounded position fuzzing for robustness.
+- `search_workspace_symbols`:
+  - If multiple language servers are configured, provide `file_path` to disambiguate which server to use.
+  - If only one server is configured, `file_path` is optional.
 
 ## Per-project configuration (optional)
 
