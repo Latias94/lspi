@@ -8,6 +8,7 @@ Current focus:
 
 - Rust via `rust-analyzer`
 - C# via OmniSharp (`omnisharp -lsp`)
+- Generic stdio LSP (`kind = "generic"`, experimental)
 
 ## Status
 

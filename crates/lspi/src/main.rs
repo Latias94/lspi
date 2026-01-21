@@ -19,6 +19,11 @@ fn is_omnisharp_kind(kind: &str) -> bool {
     normalized == "omnisharp" || normalized == "csharp"
 }
 
+fn is_generic_kind(kind: &str) -> bool {
+    let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
+    normalized == "generic" || normalized == "lsp"
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "lspi")]
 #[command(version)]
@@ -144,6 +149,7 @@ async fn main() -> Result<()> {
                 println!("server[{idx}].kind: {}", s.kind);
                 println!("server[{idx}].root_dir: {}", s.root_dir.display());
                 println!("server[{idx}].extensions: {:?}", s.extensions);
+                println!("server[{idx}].language_id: {:?}", s.language_id);
                 println!("server[{idx}].command: {:?}", s.command);
                 println!("server[{idx}].args: {:?}", s.args);
                 println!(
@@ -218,6 +224,28 @@ async fn main() -> Result<()> {
                             );
                         }
 
+                        continue;
+                    }
+
+                    if is_generic_kind(&s.kind) {
+                        let Some(command) = s.command.as_deref().filter(|c| !c.trim().is_empty())
+                        else {
+                            eprintln!(
+                                "doctor_error: id={} kind={} error=missing command for generic server",
+                                s.id, s.kind
+                            );
+                            eprintln!(
+                                "doctor_hint: For kind=generic, set servers[].command explicitly."
+                            );
+                            failures
+                                .push(format!("generic server missing command for id={}", s.id));
+                            continue;
+                        };
+
+                        println!(
+                            "server_preflight: id={} kind={} command={}",
+                            s.id, s.kind, command
+                        );
                         continue;
                     }
 

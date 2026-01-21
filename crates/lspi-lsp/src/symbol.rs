@@ -195,12 +195,18 @@ pub(crate) fn parse_workspace_symbols(value: Value) -> Result<Vec<WorkspaceSymbo
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LspCallHierarchyItem {
+pub(crate) struct LspCallHierarchyItem {
     pub name: String,
     pub kind: u32,
     pub uri: String,
     pub range: LspRange,
     pub selection_range: LspRange,
+}
+
+pub(crate) fn parse_call_hierarchy_item(value: &Value) -> Result<CallHierarchyItemResolved> {
+    let item: LspCallHierarchyItem =
+        serde_json::from_value(value.clone()).context("failed to parse CallHierarchyItem")?;
+    to_call_hierarchy_item_resolved(&item)
 }
 
 #[derive(Debug, Clone, Deserialize)]

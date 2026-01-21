@@ -91,6 +91,7 @@ impl LspiMcpServer {
                 servers,
                 rust_analyzer: Mutex::new(HashMap::new()),
                 omnisharp: Mutex::new(HashMap::new()),
+                generic: Mutex::new(HashMap::new()),
             }),
         };
 
@@ -136,6 +137,19 @@ impl LspiMcpServer {
                 continue;
             }
 
+            if kind == "generic" {
+                info!(
+                    "warmup: starting generic server_id={} root_dir={}",
+                    server.id,
+                    server.root_dir.display()
+                );
+                let _ = self
+                    .generic_for_server(server)
+                    .await
+                    .map_err(|e| anyhow!(e.to_string()))?;
+                continue;
+            }
+
             info!(
                 "warmup: skipping unsupported server kind={} id={}",
                 server.kind, server.id
@@ -168,6 +182,10 @@ impl LspiMcpServer {
                     Vec::new();
                 let mut to_shutdown_os: Vec<(String, ManagedClient<lspi_lsp::OmniSharpClient>)> =
                     Vec::new();
+                let mut to_shutdown_generic: Vec<(
+                    String,
+                    ManagedClient<lspi_lsp::GenericLspClient>,
+                )> = Vec::new();
 
                 for (id, (kind, idle)) in idle_policies.iter() {
                     if is_rust_analyzer_kind(kind) {
@@ -207,6 +225,25 @@ impl LspiMcpServer {
                         }
                         continue;
                     }
+
+                    if is_generic_kind(kind) {
+                        let removed = {
+                            let mut guard = state.generic.lock().await;
+                            if let Some(entry) = guard.get(id) {
+                                if now.duration_since(entry.last_used) >= *idle {
+                                    guard.remove(id).map(|e| (id.clone(), e))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some(r) = removed {
+                            to_shutdown_generic.push(r);
+                        }
+                        continue;
+                    }
                 }
 
                 for (id, entry) in to_shutdown_ra {
@@ -219,6 +256,13 @@ impl LspiMcpServer {
                 for (id, entry) in to_shutdown_os {
                     if let Err(entry) = shutdown_omnisharp_managed(entry).await {
                         let mut guard = state.omnisharp.lock().await;
+                        guard.insert(id, entry);
+                    }
+                }
+
+                for (id, entry) in to_shutdown_generic {
+                    if let Err(entry) = shutdown_generic_managed(entry).await {
+                        let mut guard = state.generic.lock().await;
                         guard.insert(id, entry);
                     }
                 }
@@ -380,6 +424,7 @@ struct LspiState {
     servers: Vec<lspi_core::config::ResolvedServerConfig>,
     rust_analyzer: Mutex<HashMap<String, ManagedClient<lspi_lsp::RustAnalyzerClient>>>,
     omnisharp: Mutex<HashMap<String, ManagedClient<lspi_lsp::OmniSharpClient>>>,
+    generic: Mutex<HashMap<String, ManagedClient<lspi_lsp::GenericLspClient>>>,
 }
 
 fn lsp_position_1based(pos: &lspi_lsp::LspPosition) -> Value {
@@ -735,6 +780,10 @@ enum RoutedClient {
         server_id: String,
         client: Arc<lspi_lsp::OmniSharpClient>,
     },
+    Generic {
+        server_id: String,
+        client: Arc<lspi_lsp::GenericLspClient>,
+    },
 }
 
 impl RoutedClient {
@@ -742,6 +791,7 @@ impl RoutedClient {
         match self {
             RoutedClient::Rust { server_id, .. } => server_id,
             RoutedClient::OmniSharp { server_id, .. } => server_id,
+            RoutedClient::Generic { server_id, .. } => server_id,
         }
     }
 
@@ -763,6 +813,11 @@ impl RoutedClient {
                     .find_definition_by_name(file_path, symbol_name, symbol_kind, max_symbols)
                     .await
             }
+            RoutedClient::Generic { client, .. } => {
+                client
+                    .find_definition_by_name(file_path, symbol_name, symbol_kind, max_symbols)
+                    .await
+            }
         }
     }
 
@@ -779,6 +834,11 @@ impl RoutedClient {
                     .await
             }
             RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .definition_at(file_path, position, max_definitions)
+                    .await
+            }
+            RoutedClient::Generic { client, .. } => {
                 client
                     .definition_at(file_path, position, max_definitions)
                     .await
@@ -820,6 +880,18 @@ impl RoutedClient {
                     )
                     .await
             }
+            RoutedClient::Generic { client, .. } => {
+                client
+                    .find_references_by_name(
+                        file_path,
+                        symbol_name,
+                        symbol_kind,
+                        include_declaration,
+                        max_symbols,
+                        max_references,
+                    )
+                    .await
+            }
         }
     }
 
@@ -837,6 +909,11 @@ impl RoutedClient {
                     .await
             }
             RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .references_at(file_path, position, include_declaration, max_references)
+                    .await
+            }
+            RoutedClient::Generic { client, .. } => {
                 client
                     .references_at(file_path, position, include_declaration, max_references)
                     .await
@@ -861,6 +938,11 @@ impl RoutedClient {
                     .implementation_at(file_path, position, max_results)
                     .await
             }
+            RoutedClient::Generic { client, .. } => {
+                client
+                    .implementation_at(file_path, position, max_results)
+                    .await
+            }
         }
     }
 
@@ -877,6 +959,11 @@ impl RoutedClient {
                     .await
             }
             RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .type_definition_at(file_path, position, max_results)
+                    .await
+            }
+            RoutedClient::Generic { client, .. } => {
                 client
                     .type_definition_at(file_path, position, max_results)
                     .await
@@ -901,6 +988,11 @@ impl RoutedClient {
                     .incoming_calls_at(file_path, position, max_results)
                     .await
             }
+            RoutedClient::Generic { client, .. } => {
+                client
+                    .incoming_calls_at(file_path, position, max_results)
+                    .await
+            }
         }
     }
 
@@ -921,6 +1013,11 @@ impl RoutedClient {
                     .outgoing_calls_at(file_path, position, max_results)
                     .await
             }
+            RoutedClient::Generic { client, .. } => {
+                client
+                    .outgoing_calls_at(file_path, position, max_results)
+                    .await
+            }
         }
     }
 
@@ -932,6 +1029,7 @@ impl RoutedClient {
         match self {
             RoutedClient::Rust { client, .. } => client.hover_at(file_path, position).await,
             RoutedClient::OmniSharp { client, .. } => client.hover_at(file_path, position).await,
+            RoutedClient::Generic { client, .. } => client.hover_at(file_path, position).await,
         }
     }
 
@@ -947,6 +1045,9 @@ impl RoutedClient {
             RoutedClient::OmniSharp { client, .. } => {
                 client.document_symbols(file_path, max_results).await
             }
+            RoutedClient::Generic { client, .. } => {
+                client.document_symbols(file_path, max_results).await
+            }
         }
     }
 
@@ -960,6 +1061,9 @@ impl RoutedClient {
             RoutedClient::OmniSharp { client, .. } => {
                 client.workspace_symbols(query, max_results).await
             }
+            RoutedClient::Generic { client, .. } => {
+                client.workspace_symbols(query, max_results).await
+            }
         }
     }
 
@@ -971,6 +1075,9 @@ impl RoutedClient {
         match self {
             RoutedClient::Rust { client, .. } => client.get_diagnostics(file_path, max_wait).await,
             RoutedClient::OmniSharp { client, .. } => {
+                client.get_diagnostics(file_path, max_wait).await
+            }
+            RoutedClient::Generic { client, .. } => {
                 client.get_diagnostics(file_path, max_wait).await
             }
         }
@@ -994,6 +1101,11 @@ impl RoutedClient {
                     .list_symbol_candidates(file_path, symbol_name, symbol_kind, max_symbols)
                     .await
             }
+            RoutedClient::Generic { client, .. } => {
+                client
+                    .list_symbol_candidates(file_path, symbol_name, symbol_kind, max_symbols)
+                    .await
+            }
         }
     }
 
@@ -1008,6 +1120,9 @@ impl RoutedClient {
                 client.rename_at(file_path, position, new_name).await
             }
             RoutedClient::OmniSharp { client, .. } => {
+                client.rename_at(file_path, position, new_name).await
+            }
+            RoutedClient::Generic { client, .. } => {
                 client.rename_at(file_path, position, new_name).await
             }
         }
@@ -1026,6 +1141,11 @@ impl RoutedClient {
                     .await
             }
             RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .rename_at_prepared(file_path, position, new_name)
+                    .await
+            }
+            RoutedClient::Generic { client, .. } => {
                 client
                     .rename_at_prepared(file_path, position, new_name)
                     .await
@@ -1066,6 +1186,14 @@ impl LspiMcpServer {
         if is_omnisharp_kind(&server.kind) {
             let client = self.omnisharp_for_server(server).await?;
             return Ok(RoutedClient::OmniSharp {
+                server_id: server.id.clone(),
+                client,
+            });
+        }
+
+        if is_generic_kind(&server.kind) {
+            let client = self.generic_for_server(server).await?;
+            return Ok(RoutedClient::Generic {
                 server_id: server.id.clone(),
                 client,
             });
@@ -1264,6 +1392,105 @@ impl LspiMcpServer {
 
         if let Some(existing) = inserted {
             let _ = shutdown_omnisharp_arc(arc).await;
+            return Ok(existing);
+        }
+
+        Ok(arc)
+    }
+
+    async fn generic_for_server(
+        &self,
+        server: &lspi_core::config::ResolvedServerConfig,
+    ) -> Result<Arc<lspi_lsp::GenericLspClient>, McpError> {
+        let now = Instant::now();
+
+        let restart_old = {
+            let mut guard = self.state.generic.lock().await;
+            if let Some(entry) = guard.get_mut(&server.id) {
+                if should_restart(now, entry.started_at, server.restart_interval_minutes) {
+                    guard.remove(&server.id)
+                } else {
+                    entry.last_used = now;
+                    return Ok(entry.client.clone());
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(old) = restart_old {
+            match shutdown_generic_managed(old).await {
+                Ok(()) => {}
+                Err(mut old) => {
+                    old.last_used = now;
+                    let client = old.client.clone();
+                    let mut guard = self.state.generic.lock().await;
+                    guard.insert(server.id.clone(), old);
+                    return Ok(client);
+                }
+            }
+        }
+
+        let command = match server.command.as_deref() {
+            Some(c) if !c.trim().is_empty() => c.to_string(),
+            _ => {
+                return Err(McpError::invalid_params(
+                    format!(
+                        "generic server requires an explicit command: id={} kind={}",
+                        server.id, server.kind
+                    ),
+                    None,
+                ));
+            }
+        };
+
+        let initialize_timeout = server
+            .initialize_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(|| std::time::Duration::from_secs(10));
+        let request_timeout = server
+            .request_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(|| std::time::Duration::from_secs(30));
+        let warmup_delay = server
+            .warmup_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(|| std::time::Duration::from_millis(0));
+
+        let language_id = server
+            .language_id
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| guess_language_id_from_extensions(&server.extensions));
+
+        let client = lspi_lsp::GenericLspClient::start(lspi_lsp::GenericLspClientOptions {
+            command,
+            args: server.args.clone(),
+            cwd: server.root_dir.clone(),
+            initialize_timeout,
+            request_timeout,
+            language_id,
+            warmup_delay,
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let arc = Arc::new(client);
+        let managed = ManagedClient::new(arc.clone());
+
+        let inserted = {
+            let mut guard = self.state.generic.lock().await;
+            if let Some(existing) = guard.get_mut(&server.id) {
+                existing.last_used = now;
+                Some(existing.client.clone())
+            } else {
+                guard.insert(server.id.clone(), managed);
+                None
+            }
+        };
+
+        if let Some(existing) = inserted {
+            let _ = shutdown_generic_arc(arc).await;
             return Ok(existing);
         }
 
@@ -4043,6 +4270,32 @@ impl LspiMcpServer {
                 continue;
             }
 
+            if is_generic_kind(&kind) {
+                let entry = {
+                    let mut guard = self.state.generic.lock().await;
+                    guard.remove(&id)
+                };
+
+                let Some(entry) = entry else {
+                    warnings.push(json!({
+                        "kind": "server_not_running",
+                        "server_id": id,
+                        "message": "server is not running"
+                    }));
+                    continue;
+                };
+
+                match shutdown_generic_managed(entry).await {
+                    Ok(()) => restarted.push(id),
+                    Err(entry) => {
+                        let mut guard = self.state.generic.lock().await;
+                        guard.insert(id.clone(), entry);
+                        busy.push(id);
+                    }
+                }
+                continue;
+            }
+
             warnings.push(json!({
                 "kind": "server_unsupported",
                 "server_id": id,
@@ -4191,6 +4444,32 @@ impl LspiMcpServer {
                 continue;
             }
 
+            if is_generic_kind(&kind) {
+                let entry = {
+                    let mut guard = self.state.generic.lock().await;
+                    guard.remove(&id)
+                };
+
+                let Some(entry) = entry else {
+                    warnings.push(json!({
+                        "kind": "server_not_running",
+                        "server_id": id,
+                        "message": "server is not running"
+                    }));
+                    continue;
+                };
+
+                match shutdown_generic_managed(entry).await {
+                    Ok(()) => stopped.push(id),
+                    Err(entry) => {
+                        let mut guard = self.state.generic.lock().await;
+                        guard.insert(id.clone(), entry);
+                        busy.push(id);
+                    }
+                }
+                continue;
+            }
+
             warnings.push(json!({
                 "kind": "server_unsupported",
                 "server_id": id,
@@ -4234,6 +4513,39 @@ fn is_rust_analyzer_kind(kind: &str) -> bool {
 fn is_omnisharp_kind(kind: &str) -> bool {
     let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
     normalized == "omnisharp" || normalized == "csharp"
+}
+
+fn is_generic_kind(kind: &str) -> bool {
+    let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
+    normalized == "generic" || normalized == "lsp"
+}
+
+fn guess_language_id_from_extensions(extensions: &[String]) -> String {
+    let Some(first) = extensions.first() else {
+        return "plaintext".to_string();
+    };
+
+    let ext = first.trim().trim_start_matches('.').to_ascii_lowercase();
+    match ext.as_str() {
+        "rs" => "rust",
+        "cs" => "csharp",
+        "ts" => "typescript",
+        "tsx" => "typescriptreact",
+        "js" => "javascript",
+        "jsx" => "javascriptreact",
+        "py" => "python",
+        "go" => "go",
+        "c" => "c",
+        "h" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" | "hxx" | "hh" => "cpp",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "json" => "json",
+        "toml" => "toml",
+        "yaml" | "yml" => "yaml",
+        _ => "plaintext",
+    }
+    .to_string()
 }
 
 fn should_restart(
@@ -4293,6 +4605,29 @@ async fn shutdown_omnisharp_arc(
     }
 }
 
+async fn shutdown_generic_arc(
+    mut arc: Arc<lspi_lsp::GenericLspClient>,
+) -> Result<(), Arc<lspi_lsp::GenericLspClient>> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if Arc::strong_count(&arc) == 1 {
+            match Arc::try_unwrap(arc) {
+                Ok(client) => {
+                    let _ = client.shutdown().await;
+                    return Ok(());
+                }
+                Err(a) => arc = a,
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Err(arc);
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 async fn shutdown_rust_analyzer_managed(
     entry: ManagedClient<lspi_lsp::RustAnalyzerClient>,
 ) -> Result<(), ManagedClient<lspi_lsp::RustAnalyzerClient>> {
@@ -4322,6 +4657,25 @@ async fn shutdown_omnisharp_managed(
     } = entry;
 
     match shutdown_omnisharp_arc(client).await {
+        Ok(()) => Ok(()),
+        Err(client) => Err(ManagedClient {
+            client,
+            started_at,
+            last_used,
+        }),
+    }
+}
+
+async fn shutdown_generic_managed(
+    entry: ManagedClient<lspi_lsp::GenericLspClient>,
+) -> Result<(), ManagedClient<lspi_lsp::GenericLspClient>> {
+    let ManagedClient {
+        client,
+        started_at,
+        last_used,
+    } = entry;
+
+    match shutdown_generic_arc(client).await {
         Ok(()) => Ok(()),
         Err(client) => Err(ManagedClient {
             client,

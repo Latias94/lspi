@@ -29,6 +29,8 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
 - LSP stdio JSON-RPC transport (minimal)
 - LSP client capabilities:
   - requests hierarchical document symbols (improves selectionRange for name-based tools)
+- Generic LSP integration:
+  - `generic` stdio adapter with on-demand `didOpen`/`didChange` sync (full-content)
 - rust-analyzer integration:
   - initialize + `experimental/serverStatus` notification handling (bounded warmup)
   - didOpen/didChange sync (full-content)
@@ -49,7 +51,7 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
   - `get_diagnostics` (from publishDiagnostics cache; best-effort wait)
   - `rename_symbol` (preview, and apply when `dry_run=false`)
   - `rename_symbol_strict` (position fuzzing + preview/apply)
-  - `restart_server` (rust-analyzer only)
+  - `restart_server` (per configured server by extension match)
   - `stop_server` (stop language servers; respects lifecycle policies)
 - Safe edit application (current state):
   - optional `expected_before_sha256` precondition

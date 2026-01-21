@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use lspi_core::hashing::sha256_hex;
-use serde::Deserialize;
 use serde_json::Value;
 use tokio::fs;
 use tokio::process::Command;
@@ -19,19 +18,9 @@ use crate::symbol::{
     CallHierarchyIncomingCallMatch, CallHierarchyIncomingResult, CallHierarchyItemResolved,
     CallHierarchyOutgoingCallMatch, CallHierarchyOutgoingResult, DefinitionMatch, FlatSymbol,
     ReferenceMatch, RenameCandidate, ResolvedLocation, ResolvedSymbol, WorkspaceSymbolMatch,
-    parse_incoming_calls, parse_locations, parse_outgoing_calls, parse_symbols,
-    parse_workspace_symbols, to_lsp_location, to_resolved_location,
+    parse_call_hierarchy_item, parse_incoming_calls, parse_locations, parse_outgoing_calls,
+    parse_symbols, parse_workspace_symbols, to_lsp_location, to_resolved_location,
 };
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LspCallHierarchyItem {
-    pub name: String,
-    pub kind: u32,
-    pub uri: String,
-    pub range: crate::lsp::LspRange,
-    pub selection_range: crate::lsp::LspRange,
-}
 
 #[derive(Debug, Clone)]
 pub struct RustAnalyzerClientOptions {
@@ -552,20 +541,7 @@ impl RustAnalyzerClient {
     }
 
     fn parse_call_hierarchy_item_value(&self, value: &Value) -> Result<CallHierarchyItemResolved> {
-        let item: LspCallHierarchyItem =
-            serde_json::from_value(value.clone()).context("failed to parse CallHierarchyItem")?;
-        let loc = crate::lsp::LspLocation {
-            uri: item.uri.clone(),
-            range: item.range.clone(),
-        };
-        let location = to_resolved_location(&loc)?;
-        Ok(CallHierarchyItemResolved {
-            name: item.name,
-            kind: item.kind,
-            location,
-            range: item.range,
-            selection_range: item.selection_range,
-        })
+        parse_call_hierarchy_item(value)
     }
 
     async fn prepare_call_hierarchy_with_retry(

@@ -127,6 +127,8 @@ pwsh scripts/mcp_smoke_csharp.ps1 -ProjectPath C:\path\to\MySolution.sln
 pwsh scripts/mcp_smoke_csharp.ps1 -ProjectPath C:\path\to\MyProject.csproj
 ```
 
+Note: when `-ProjectPath` is provided, the script passes it to OmniSharp best-effort (prefers `--solution`/`-s` or `--project`/`-p` if supported; otherwise passes it as a positional argument).
+
 If you want to exercise position-based tools (definition/references/rename), provide a test file and a needle string:
 
 ```powershell

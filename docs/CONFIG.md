@@ -23,11 +23,12 @@ Overrides the workspace root used for safety checks and path resolution.
 ```toml
 [[servers]]
 id = "rust-analyzer"               # optional but recommended
-kind = "rust_analyzer"             # required (supported: rust_analyzer, omnisharp)
+kind = "rust_analyzer"             # required (supported: rust_analyzer, omnisharp, generic)
 extensions = ["rs"]                # required (no leading dots)
 # root_dir = "."                   # optional; absolute or relative to workspace_root
 # command = "rust-analyzer"        # optional; defaults to auto-resolve
 # args = []                        # optional
+# language_id = "rust"             # optional; used by kind="generic" (best-effort default from extension)
 initialize_timeout_ms = 10000      # optional
 request_timeout_ms = 30000         # optional
 warmup_timeout_ms = 5000           # optional
@@ -70,6 +71,27 @@ If `command` is not set for an `omnisharp` server, `lspi` tries:
 
 - `LSPI_OMNISHARP_COMMAND`
 - `omnisharp` from `PATH`
+
+### Generic LSP example (TypeScript)
+
+Use `kind = "generic"` for any stdio-based LSP server where `lspi` should not apply language-specific behavior.
+
+```toml
+[[servers]]
+id = "ts"
+kind = "generic"
+extensions = ["ts", "tsx", "js", "jsx"]
+language_id = "typescript"
+command = "typescript-language-server"
+args = ["--stdio"]
+initialize_timeout_ms = 10000
+request_timeout_ms = 30000
+```
+
+Notes:
+
+- `language_id` controls the `textDocument/didOpen` languageId. If omitted, `lspi` guesses from the first extension.
+- For `kind = "generic"`, `command` is required (no auto-resolve).
 
 ### Lifecycle options (optional)
 

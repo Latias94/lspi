@@ -1,3 +1,4 @@
+mod generic;
 mod lsp;
 mod omnisharp;
 mod rust_analyzer;
@@ -5,6 +6,7 @@ mod symbol;
 
 pub use lsp::{LspDiagnostic, LspPosition, LspRange, LspTextEdit};
 
+pub use generic::{GenericLspClient, GenericLspClientOptions};
 pub use omnisharp::{
     OmniSharpClient, OmniSharpClientOptions, preflight_omnisharp, resolve_omnisharp_command,
 };

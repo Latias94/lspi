@@ -33,6 +33,11 @@ pub struct LspServerConfig {
     /// File extensions (without a leading dot) routed to this server, e.g. `["rs"]`.
     #[serde(default)]
     pub extensions: Option<Vec<String>>,
+    /// Optional languageId used for textDocument/didOpen when `kind = "generic"`.
+    /// If omitted, lspi tries a best-effort mapping from the first extension.
+    #[serde(default)]
+    #[serde(alias = "languageId")]
+    pub language_id: Option<String>,
     /// Optional root directory for this server (absolute or relative to `workspace_root`).
     #[serde(default)]
     #[serde(alias = "rootDir")]
@@ -102,6 +107,7 @@ pub struct ResolvedServerConfig {
     pub command: Option<String>,
     pub args: Vec<String>,
     pub extensions: Vec<String>,
+    pub language_id: Option<String>,
     pub root_dir: PathBuf,
     pub initialize_timeout_ms: Option<u64>,
     pub request_timeout_ms: Option<u64>,
@@ -301,6 +307,11 @@ fn resolve_server_config(
             .filter(|s| !s.is_empty()),
         args: server.args.clone().unwrap_or_default(),
         extensions,
+        language_id: server
+            .language_id
+            .clone()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
         root_dir,
         initialize_timeout_ms: server.initialize_timeout_ms,
         request_timeout_ms: server.request_timeout_ms,
@@ -317,6 +328,7 @@ fn default_rust_analyzer_server(workspace_root: &Path) -> ResolvedServerConfig {
         command: None,
         args: Vec::new(),
         extensions: vec!["rs".to_string()],
+        language_id: Some("rust".to_string()),
         root_dir: workspace_root.to_path_buf(),
         initialize_timeout_ms: None,
         request_timeout_ms: None,
@@ -377,6 +389,7 @@ mod tests {
         assert_eq!(servers[0].id, "rust-analyzer");
         assert_eq!(servers[0].kind, "rust_analyzer");
         assert_eq!(servers[0].extensions, vec!["rs".to_string()]);
+        assert_eq!(servers[0].language_id.as_deref(), Some("rust"));
         assert_eq!(servers[0].root_dir, root_canon);
     }
 
@@ -481,6 +494,7 @@ exclude = ["rename_symbol"]
                 command: None,
                 args: Vec::new(),
                 extensions: vec!["rs".to_string()],
+                language_id: None,
                 root_dir: root.clone(),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
@@ -494,6 +508,7 @@ exclude = ["rename_symbol"]
                 command: None,
                 args: Vec::new(),
                 extensions: vec!["rs".to_string()],
+                language_id: None,
                 root_dir: nested.clone(),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
@@ -524,6 +539,7 @@ exclude = ["rename_symbol"]
                 command: None,
                 args: Vec::new(),
                 extensions: vec!["rs".to_string()],
+                language_id: None,
                 root_dir: root.join("does-not-contain"),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
@@ -537,6 +553,7 @@ exclude = ["rename_symbol"]
                 command: None,
                 args: Vec::new(),
                 extensions: vec!["rs".to_string()],
+                language_id: None,
                 root_dir: root.join("also-does-not-contain"),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,

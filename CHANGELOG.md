@@ -11,6 +11,7 @@ Initial 0.1.0 milestone of `lspi` (Rust workspace), providing an MCP stdio serve
 ### Added
 
 - MCP stdio server (`lspi mcp`) with structured `structuredContent` responses.
+- Generic stdio LSP adapter (`kind = "generic"`) for any LSP server that speaks JSON-RPC over stdio.
 - Core MCP tools:
   - `find_definition` / `find_definition_at`
   - `find_references` / `find_references_at`
@@ -59,6 +60,7 @@ Initial 0.1.0 milestone of `lspi` (Rust workspace), providing an MCP stdio serve
 
 ### Known limitations
 
-- Only `rust_analyzer` and `omnisharp` server kinds are supported in 0.1.x.
+- Only `rust_analyzer`, `omnisharp`, and `generic` server kinds are supported in 0.1.0.
+- For `kind = "generic"`, `command` is required (no auto-resolve); `language_id` is recommended for reliable `didOpen`.
 - Binaries are not distributed yet; installation is via `cargo install --path ...`.
 - C# integration depends on the local OmniSharp installation and can vary by environment.

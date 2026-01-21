@@ -135,6 +135,61 @@ function Should-Skip($reason) {
   throw $reason
 }
 
+function Resolve-OmniSharpCommand() {
+  $cmd = $env:LSPI_OMNISHARP_COMMAND
+  if (-not [string]::IsNullOrWhiteSpace($cmd)) { return $cmd }
+  return "omnisharp"
+}
+
+function Assert-OmniSharpAvailable($cmd) {
+  if (Test-Path -LiteralPath $cmd -PathType Leaf) { return }
+  if ($null -ne (Get-Command $cmd -ErrorAction SilentlyContinue)) { return }
+  Should-Skip "omnisharp is not available (install OmniSharp and ensure `omnisharp` is runnable, or set LSPI_OMNISHARP_COMMAND)"
+}
+
+function Get-OmniSharpHelpText($cmd) {
+  try {
+    return (& $cmd --help 2>&1 | Out-String)
+  } catch {
+    return ""
+  }
+}
+
+function Escape-TomlBasicString($s) {
+  if ($null -eq $s) { return "" }
+  return $s.Replace("\", "\\").Replace('"', '\"')
+}
+
+function To-TomlArrayOfStrings($arr) {
+  $items = @()
+  foreach ($x in $arr) {
+    $items += ('"' + (Escape-TomlBasicString ([string]$x)) + '"')
+  }
+  return "[" + ($items -join ", ") + "]"
+}
+
+function Resolve-OmniSharpArgs($cmd, $projectFile) {
+  $args = @("-lsp")
+  if ([string]::IsNullOrWhiteSpace($projectFile)) { return $args }
+
+  $ext = [System.IO.Path]::GetExtension($projectFile).ToLowerInvariant()
+  $help = Get-OmniSharpHelpText $cmd
+
+  if ($ext -eq ".sln") {
+    if ($help -match "(?m)\\B--solution\\b") { return @("-lsp", "--solution", $projectFile) }
+    if ($help -match "(?m)\\B-s\\b") { return @("-lsp", "-s", $projectFile) }
+    return @("-lsp", $projectFile)
+  }
+
+  if ($ext -eq ".csproj") {
+    if ($help -match "(?m)\\B--project\\b") { return @("-lsp", "--project", $projectFile) }
+    if ($help -match "(?m)\\B-p\\b") { return @("-lsp", "-p", $projectFile) }
+    return @("-lsp", $projectFile)
+  }
+
+  return @("-lsp", $projectFile)
+}
+
 function Resolve-ProjectRoot($workspaceRoot, $projectPath) {
   if (-not [string]::IsNullOrWhiteSpace($workspaceRoot)) {
     return (Resolve-Path -LiteralPath $workspaceRoot).Path
@@ -143,6 +198,10 @@ function Resolve-ProjectRoot($workspaceRoot, $projectPath) {
   if (-not [string]::IsNullOrWhiteSpace($projectPath)) {
     $pp = (Resolve-Path -LiteralPath $projectPath).Path
     if (Test-Path -LiteralPath $pp -PathType Leaf) {
+      $ext = [System.IO.Path]::GetExtension($pp).ToLowerInvariant()
+      if ($ext -ne ".sln" -and $ext -ne ".csproj") {
+        throw "ProjectPath must be a .sln or .csproj (got: $pp)"
+      }
       return (Split-Path -Parent $pp)
     }
     if (Test-Path -LiteralPath $pp -PathType Container) {
@@ -174,9 +233,8 @@ Write-Host "Checking prerequisites..." -ForegroundColor Cyan
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
   Should-Skip "dotnet is not available on PATH"
 }
-if (-not (Get-Command omnisharp -ErrorAction SilentlyContinue)) {
-  Should-Skip "omnisharp is not available on PATH (set LSPI_OMNISHARP_COMMAND or install OmniSharp)"
-}
+$omnisharpCmd = Resolve-OmniSharpCommand
+Assert-OmniSharpAvailable $omnisharpCmd
 
 Write-Host "Building lspi (debug)..." -ForegroundColor Cyan
 & cargo build -p lspi | Out-Host
@@ -190,6 +248,12 @@ $resolvedWorkspaceRoot = Resolve-ProjectRoot $WorkspaceRoot $ProjectPath
 $projectFile = $null
 if (-not [string]::IsNullOrWhiteSpace($ProjectPath)) {
   $projectFile = (Resolve-Path -LiteralPath $ProjectPath).Path
+  if (Test-Path -LiteralPath $projectFile -PathType Leaf) {
+    $ext = [System.IO.Path]::GetExtension($projectFile).ToLowerInvariant()
+    if ($ext -ne ".sln" -and $ext -ne ".csproj") {
+      throw "ProjectPath must be a .sln or .csproj (got: $projectFile)"
+    }
+  }
 } else {
   $projectFile = Pick-ProjectFile $resolvedWorkspaceRoot
 }
@@ -217,13 +281,15 @@ if (-not [string]::IsNullOrWhiteSpace($TestFile)) {
 }
 
 $tmpConfig = Join-Path -Path $env:TEMP -ChildPath ("lspi-csharp-config-" + [Guid]::NewGuid().ToString("N") + ".toml")
+$omnisharpArgs = Resolve-OmniSharpArgs $omnisharpCmd $projectFile
+$omnisharpArgsToml = To-TomlArrayOfStrings $omnisharpArgs
 @"
 [[servers]]
 id = "omnisharp"
 kind = "omnisharp"
 extensions = ["cs"]
 root_dir = "."
-args = ["-lsp"]
+args = $omnisharpArgsToml
 initialize_timeout_ms = 20000
 request_timeout_ms = 30000
 warmup_timeout_ms = 0
