@@ -19,7 +19,8 @@ lspi doctor --workspace-root .
 Notes:
 
 - `--wizard` does a best-effort scan for Rust/C# projects and generates matching `[[servers]]`.
-- The default is non-interactive unless you explicitly pass `--interactive`.
+- By default, `--wizard` is interactive when stdin/stdout are TTYs. Use `--non-interactive` for CI/scripts.
+- You can force prompts with `--interactive` or force-disable them with `--non-interactive`.
 - If you prefer the minimal Rust-only template, use:
   - `lspi setup --write`
 
