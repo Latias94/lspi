@@ -54,9 +54,13 @@ Initial 0.1.0 milestone of `lspi` (Rust workspace), providing an MCP stdio serve
   - `scripts/mcp_smoke_csharp.ps1` (C#, best-effort; skips if prerequisites missing)
   - `scripts/mcp_smoke_ts.ps1` (TypeScript via generic LSP, best-effort; skips if prerequisites missing)
   - `scripts/mcp_smoke_go.ps1` (Go via generic LSP, best-effort; skips if prerequisites missing)
+  - `scripts/mcp_smoke_python.ps1` (Python via generic LSP, best-effort; skips if prerequisites missing)
+  - `scripts/mcp_smoke_lua.ps1` (Lua via generic LSP, best-effort; skips if prerequisites missing)
   - minimal C# sample project under `samples/csharp/Hello/`
   - minimal TypeScript sample project under `samples/typescript/Hello/`
   - minimal Go sample project under `samples/go/Hello/`
+  - minimal Python sample project under `samples/python/Hello/`
+  - minimal Lua sample project under `samples/lua/Hello/`
 
 ### Changed
 

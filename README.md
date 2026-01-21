@@ -11,6 +11,8 @@ Current focus:
 - Generic stdio LSP (`kind = "generic"`, experimental)
 - TypeScript via `typescript-language-server` (through `kind = "generic"`)
 - Go via `gopls` (through `kind = "generic"`)
+- Python via `pyright-langserver` (through `kind = "generic"`)
+- Lua via `lua-language-server` (through `kind = "generic"`)
 
 ## Status
 

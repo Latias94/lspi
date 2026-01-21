@@ -200,3 +200,51 @@ Notes:
 - If `gopls` is missing, you can install it with:
   - `go install golang.org/x/tools/gopls@latest`
   - or run the script with `-InstallGopls` (best-effort).
+
+## Python (generic LSP) smoke test
+
+This repository includes a minimal Python project at `samples/python/Hello/` and a smoke script:
+
+```powershell
+pwsh scripts/mcp_smoke_python.ps1
+```
+
+Run against a real Python project:
+
+```powershell
+pwsh scripts/mcp_smoke_python.ps1 -WorkspaceRoot C:\path\to\my-python-project
+```
+
+Prerequisites (best-effort):
+
+- `node` + `npm` available on `PATH`
+- `pyright-langserver` available either:
+  - locally under `<project>/node_modules/.bin/` (recommended), or
+  - globally on `PATH`
+
+Notes:
+
+- The script defaults to `-SkipIfMissing` so it does not fail if prerequisites are missing.
+- If your project has `package.json` but no `node_modules`, either run `npm install` first or pass `-InstallDeps`.
+
+## Lua (generic LSP) smoke test
+
+This repository includes a minimal Lua project at `samples/lua/Hello/` and a smoke script:
+
+```powershell
+pwsh scripts/mcp_smoke_lua.ps1
+```
+
+Run against a real Lua project:
+
+```powershell
+pwsh scripts/mcp_smoke_lua.ps1 -WorkspaceRoot C:\path\to\my-lua-project
+```
+
+Prerequisites (best-effort):
+
+- `lua-language-server` available on `PATH`
+
+Notes:
+
+- The script defaults to `-SkipIfMissing` so it does not fail if prerequisites are missing.

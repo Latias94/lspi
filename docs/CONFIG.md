@@ -107,6 +107,34 @@ initialize_timeout_ms = 20000
 request_timeout_ms = 30000
 ```
 
+### Generic LSP example (Python / pyright-langserver)
+
+```toml
+[[servers]]
+id = "python"
+kind = "generic"
+extensions = ["py"]
+language_id = "python"
+command = "pyright-langserver"
+args = ["--stdio"]
+initialize_timeout_ms = 20000
+request_timeout_ms = 30000
+```
+
+### Generic LSP example (Lua / lua-language-server)
+
+```toml
+[[servers]]
+id = "lua"
+kind = "generic"
+extensions = ["lua"]
+language_id = "lua"
+command = "lua-language-server"
+args = []
+initialize_timeout_ms = 20000
+request_timeout_ms = 30000
+```
+
 ### Lifecycle options (optional)
 
 These options control how `lspi` manages long-running language server processes:

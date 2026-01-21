@@ -17,6 +17,8 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
 - Smoke test helper script: `scripts/mcp_smoke.ps1`
 - TypeScript smoke test helper script: `scripts/mcp_smoke_ts.ps1` (generic LSP)
 - Go smoke test helper script: `scripts/mcp_smoke_go.ps1` (generic LSP)
+- Python smoke test helper script: `scripts/mcp_smoke_python.ps1` (generic LSP)
+- Lua smoke test helper script: `scripts/mcp_smoke_lua.ps1` (generic LSP)
 - Codex integration doc: `docs/CODEX.md`
 - MCP stdio server entrypoint (`lspi mcp`)
 - Windows smoke test: `scripts/mcp_smoke.ps1` passes with rust-analyzer 1.92.0 (2025-12-08)
