@@ -8,11 +8,10 @@ use tokio::fs;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::lsp::{
-    LspClient, LspClientOptions, LspDiagnostic, LspPosition, LspTextEdit, ServerStatus,
-    normalize_workspace_edit,
+    LspClient, LspClientOptions, LspDiagnostic, LspPosition, LspTextEdit, normalize_workspace_edit,
 };
 use crate::symbol::{
     DefinitionMatch, FlatSymbol, ReferenceMatch, RenameCandidate, ResolvedLocation, ResolvedSymbol,
@@ -20,86 +19,63 @@ use crate::symbol::{
 };
 
 #[derive(Debug, Clone)]
-pub struct RustAnalyzerClientOptions {
+pub struct OmniSharpClientOptions {
     pub command: String,
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub initialize_timeout: Duration,
     pub request_timeout: Duration,
-    pub warmup_timeout: Duration,
+    pub warmup_delay: Duration,
 }
 
-pub async fn resolve_rust_analyzer_command() -> Result<String> {
-    if let Ok(value) = std::env::var("LSPI_RUST_ANALYZER_COMMAND") {
+pub async fn resolve_omnisharp_command() -> Result<String> {
+    if let Ok(value) = std::env::var("LSPI_OMNISHARP_COMMAND") {
         if !value.trim().is_empty() {
             return Ok(value);
         }
     }
+    Ok("omnisharp".to_string())
+}
 
-    // If the user installed rust-analyzer via rustup component, rustup can tell us the actual path.
-    let output = Command::new("rustup")
-        .args(["which", "rust-analyzer"])
-        .output()
-        .await;
-
-    if let Ok(output) = output {
+pub async fn preflight_omnisharp(command: &str) -> Result<()> {
+    // OmniSharp installs vary; try a couple of common flags.
+    for args in [
+        ["--version"].as_slice(),
+        ["-h"].as_slice(),
+        ["--help"].as_slice(),
+    ] {
+        let output = Command::new(command)
+            .args(args)
+            .output()
+            .await
+            .with_context(|| format!("failed to run `{command} {}`", args.join(" ")))?;
         if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Ok(path);
-            }
+            return Ok(());
         }
     }
 
-    Ok("rust-analyzer".to_string())
-}
-
-pub async fn preflight_rust_analyzer(command: &str) -> Result<()> {
-    let output = Command::new(command)
-        .arg("--version")
-        .output()
-        .await
-        .with_context(|| format!("failed to run `{command} --version`"))?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("Unknown binary") && stderr.contains("rust-analyzer") {
-        return Err(anyhow::anyhow!(
-            "rust-analyzer is not installed. Install it via `rustup component add rust-analyzer` or set LSPI_RUST_ANALYZER_COMMAND to a valid rust-analyzer binary."
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
     Err(anyhow!(
-        "`{command} --version` failed (status={} stdout={:?} stderr={:?})",
-        output.status,
-        stdout.trim(),
-        stderr.trim()
+        "omnisharp is not available on PATH. Install OmniSharp (and ensure `omnisharp` is runnable), or set LSPI_OMNISHARP_COMMAND to the OmniSharp binary path."
     ))
 }
 
-impl Default for RustAnalyzerClientOptions {
+impl Default for OmniSharpClientOptions {
     fn default() -> Self {
         Self {
-            command: "rust-analyzer".to_string(),
-            args: Vec::new(),
+            command: "omnisharp".to_string(),
+            args: vec!["-lsp".to_string()],
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             initialize_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
-            warmup_timeout: Duration::from_secs(5),
+            warmup_delay: Duration::from_millis(0),
         }
     }
 }
 
-pub struct RustAnalyzerClient {
+pub struct OmniSharpClient {
     lsp: LspClient,
     open_files: Mutex<HashMap<PathBuf, OpenFileState>>,
-    status_rx: tokio::sync::watch::Receiver<Option<ServerStatus>>,
-    request_timeout: Duration,
-    warmup_timeout: Duration,
+    warmup_delay: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -108,8 +84,8 @@ struct OpenFileState {
     last_sha256: String,
 }
 
-impl RustAnalyzerClient {
-    pub async fn start(options: RustAnalyzerClientOptions) -> Result<Self> {
+impl OmniSharpClient {
+    pub async fn start(options: OmniSharpClientOptions) -> Result<Self> {
         let lsp = LspClient::start(LspClientOptions {
             command: options.command,
             args: options.args,
@@ -119,42 +95,15 @@ impl RustAnalyzerClient {
         })
         .await?;
 
-        let status_rx = lsp.server_status_receiver();
-
         Ok(Self {
             lsp,
             open_files: Mutex::new(HashMap::new()),
-            status_rx,
-            request_timeout: options.request_timeout,
-            warmup_timeout: options.warmup_timeout,
+            warmup_delay: options.warmup_delay,
         })
     }
 
     pub async fn shutdown(self) -> Result<()> {
         self.lsp.shutdown().await
-    }
-
-    pub async fn wait_quiescent(&self) -> Result<Option<ServerStatus>> {
-        let mut rx = self.status_rx.clone();
-        let deadline = tokio::time::Instant::now() + self.warmup_timeout;
-
-        loop {
-            if let Some(status) = rx.borrow().clone() {
-                if status.quiescent {
-                    return Ok(Some(status));
-                }
-            }
-
-            let now = tokio::time::Instant::now();
-            if now >= deadline {
-                return Ok(rx.borrow().clone());
-            }
-
-            let remaining = deadline.saturating_duration_since(now);
-            if tokio::time::timeout(remaining, rx.changed()).await.is_err() {
-                return Ok(rx.borrow().clone());
-            }
-        }
     }
 
     async fn document_symbols_with_retry(&self, file_path: &Path) -> Result<Vec<FlatSymbol>> {
@@ -166,8 +115,8 @@ impl RustAnalyzerClient {
                         if !symbols.is_empty() {
                             return Ok(symbols);
                         }
-                        if attempt == 0 {
-                            let _ = self.wait_quiescent().await?;
+                        if attempt == 0 && !self.warmup_delay.is_zero() {
+                            tokio::time::sleep(self.warmup_delay).await;
                         }
                         tokio::time::sleep(Duration::from_millis(200)).await;
                     }
@@ -196,8 +145,8 @@ impl RustAnalyzerClient {
                         if !defs.is_empty() {
                             return Ok(defs);
                         }
-                        if attempt == 0 {
-                            let _ = self.wait_quiescent().await?;
+                        if attempt == 0 && !self.warmup_delay.is_zero() {
+                            tokio::time::sleep(self.warmup_delay).await;
                         }
                         tokio::time::sleep(Duration::from_millis(200)).await;
                     }
@@ -231,8 +180,8 @@ impl RustAnalyzerClient {
                         if !refs.is_empty() {
                             return Ok(refs);
                         }
-                        if attempt == 0 {
-                            let _ = self.wait_quiescent().await?;
+                        if attempt == 0 && !self.warmup_delay.is_zero() {
+                            tokio::time::sleep(self.warmup_delay).await;
                         }
                         tokio::time::sleep(Duration::from_millis(200)).await;
                     }
@@ -255,17 +204,7 @@ impl RustAnalyzerClient {
         symbol_kind: Option<u32>,
         max_symbols: usize,
     ) -> Result<Vec<DefinitionMatch>> {
-        self.open_or_sync(file_path, "rust").await?;
-
-        // For a better first-call experience, wait (bounded) for rust-analyzer to settle.
-        if let Some(status) = self.wait_quiescent().await? {
-            if !status.quiescent {
-                warn!(
-                    "rust-analyzer not quiescent yet: health={} message={:?}",
-                    status.health, status.message
-                );
-            }
-        }
+        self.prepare_file(file_path).await?;
 
         let symbols = self.document_symbols_with_retry(file_path).await?;
 
@@ -306,16 +245,7 @@ impl RustAnalyzerClient {
         position: LspPosition,
         max_definitions: usize,
     ) -> Result<Vec<ResolvedLocation>> {
-        self.open_or_sync(file_path, "rust").await?;
-
-        if let Some(status) = self.wait_quiescent().await? {
-            if !status.quiescent {
-                warn!(
-                    "rust-analyzer not quiescent yet: health={} message={:?}",
-                    status.health, status.message
-                );
-            }
-        }
+        self.prepare_file(file_path).await?;
 
         let defs = self
             .definition_values_with_retry(file_path, position)
@@ -338,16 +268,7 @@ impl RustAnalyzerClient {
         include_declaration: bool,
         max_references: usize,
     ) -> Result<(Vec<ResolvedLocation>, bool)> {
-        self.open_or_sync(file_path, "rust").await?;
-
-        if let Some(status) = self.wait_quiescent().await? {
-            if !status.quiescent {
-                warn!(
-                    "rust-analyzer not quiescent yet: health={} message={:?}",
-                    status.health, status.message
-                );
-            }
-        }
+        self.prepare_file(file_path).await?;
 
         let refs = self
             .reference_values_with_retry(file_path, position, include_declaration)
@@ -378,16 +299,7 @@ impl RustAnalyzerClient {
         max_symbols: usize,
         max_references: usize,
     ) -> Result<Vec<ReferenceMatch>> {
-        self.open_or_sync(file_path, "rust").await?;
-
-        if let Some(status) = self.wait_quiescent().await? {
-            if !status.quiescent {
-                warn!(
-                    "rust-analyzer not quiescent yet: health={} message={:?}",
-                    status.health, status.message
-                );
-            }
-        }
+        self.prepare_file(file_path).await?;
 
         let symbols = self.document_symbols_with_retry(file_path).await?;
 
@@ -443,8 +355,7 @@ impl RustAnalyzerClient {
         file_path: &Path,
         max_wait: Duration,
     ) -> Result<Vec<LspDiagnostic>> {
-        self.open_or_sync(file_path, "rust").await?;
-        let _ = self.wait_quiescent().await?;
+        self.open_or_sync(file_path, "csharp").await?;
         self.lsp
             .wait_for_diagnostics_update(file_path, max_wait)
             .await
@@ -457,9 +368,7 @@ impl RustAnalyzerClient {
         symbol_kind: Option<u32>,
         max_symbols: usize,
     ) -> Result<Vec<RenameCandidate>> {
-        self.open_or_sync(file_path, "rust").await?;
-
-        let _ = self.wait_quiescent().await?;
+        self.prepare_file(file_path).await?;
 
         let symbols = self.document_symbols_with_retry(file_path).await?;
 
@@ -499,8 +408,7 @@ impl RustAnalyzerClient {
     }
 
     async fn prepare_file(&self, file_path: &Path) -> Result<()> {
-        self.open_or_sync(file_path, "rust").await?;
-        let _ = self.wait_quiescent().await?;
+        self.open_or_sync(file_path, "csharp").await?;
         Ok(())
     }
 
@@ -526,6 +434,9 @@ impl RustAnalyzerClient {
                         last_sha256: hash,
                     },
                 );
+                if !self.warmup_delay.is_zero() {
+                    tokio::time::sleep(self.warmup_delay).await;
+                }
             }
             Some(state) => {
                 if state.last_sha256 != hash {
