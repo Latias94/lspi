@@ -10,6 +10,7 @@ pub use omnisharp::{
 };
 pub use symbol::parse_symbol_kind;
 pub use symbol::{
+    CallHierarchyIncomingResult, CallHierarchyItemResolved, CallHierarchyOutgoingResult,
     DefinitionMatch, ReferenceMatch, RenameCandidate, ResolvedLocation, ResolvedSymbol,
     WorkspaceSymbolMatch,
 };

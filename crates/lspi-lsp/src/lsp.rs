@@ -387,6 +387,32 @@ impl LspClient {
             .await
     }
 
+    pub async fn prepare_call_hierarchy(
+        &self,
+        path: &Path,
+        position: LspPosition,
+    ) -> Result<Value> {
+        let uri = path_to_uri(path)?;
+        let params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": position
+        });
+        self.send_request("textDocument/prepareCallHierarchy", &params, None)
+            .await
+    }
+
+    pub async fn call_hierarchy_incoming_calls(&self, item: &Value) -> Result<Value> {
+        let params = serde_json::json!({ "item": item });
+        self.send_request("callHierarchy/incomingCalls", &params, None)
+            .await
+    }
+
+    pub async fn call_hierarchy_outgoing_calls(&self, item: &Value) -> Result<Value> {
+        let params = serde_json::json!({ "item": item });
+        self.send_request("callHierarchy/outgoingCalls", &params, None)
+            .await
+    }
+
     pub async fn document_diagnostics(
         &self,
         path: &Path,
@@ -526,6 +552,9 @@ impl LspClient {
                 "textDocument": {
                     "documentSymbol": {
                         "hierarchicalDocumentSymbolSupport": true
+                    },
+                    "callHierarchy": {
+                        "dynamicRegistration": true
                     }
                 },
                 "experimental": {

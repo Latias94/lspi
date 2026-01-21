@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::lsp::{
@@ -19,6 +19,39 @@ pub struct ReferenceMatch {
     pub symbol: ResolvedSymbol,
     pub references: Vec<ResolvedLocation>,
     pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallHierarchyItemResolved {
+    pub name: String,
+    pub kind: u32,
+    pub location: ResolvedLocation,
+    pub range: LspRange,
+    pub selection_range: LspRange,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallHierarchyIncomingCallMatch {
+    pub from: CallHierarchyItemResolved,
+    pub from_ranges: Vec<LspRange>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallHierarchyOutgoingCallMatch {
+    pub to: CallHierarchyItemResolved,
+    pub from_ranges: Vec<LspRange>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallHierarchyIncomingResult {
+    pub target: Option<CallHierarchyItemResolved>,
+    pub calls: Vec<CallHierarchyIncomingCallMatch>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CallHierarchyOutgoingResult {
+    pub target: Option<CallHierarchyItemResolved>,
+    pub calls: Vec<CallHierarchyOutgoingCallMatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -156,6 +189,105 @@ pub(crate) fn parse_workspace_symbols(value: Value) -> Result<Vec<WorkspaceSymbo
                 location,
             });
         }
+    }
+    Ok(out)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspCallHierarchyItem {
+    pub name: String,
+    pub kind: u32,
+    pub uri: String,
+    pub range: LspRange,
+    pub selection_range: LspRange,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspCallHierarchyIncomingCall {
+    pub from: LspCallHierarchyItem,
+    #[serde(rename = "fromRanges")]
+    pub from_ranges: Vec<LspRange>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspCallHierarchyOutgoingCall {
+    pub to: LspCallHierarchyItem,
+    #[serde(rename = "fromRanges")]
+    pub from_ranges: Vec<LspRange>,
+}
+
+fn to_call_hierarchy_item_resolved(
+    item: &LspCallHierarchyItem,
+) -> Result<CallHierarchyItemResolved> {
+    let loc = LspLocation {
+        uri: item.uri.clone(),
+        range: item.range.clone(),
+    };
+    let location = to_resolved_location(&loc)?;
+    Ok(CallHierarchyItemResolved {
+        name: item.name.clone(),
+        kind: item.kind,
+        location,
+        range: item.range.clone(),
+        selection_range: item.selection_range.clone(),
+    })
+}
+
+pub(crate) fn parse_incoming_calls(value: Value) -> Result<Vec<CallHierarchyIncomingCallMatch>> {
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    let Some(arr) = value.as_array() else {
+        return Err(anyhow!("incomingCalls response is not an array"));
+    };
+    if arr.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let calls: Vec<LspCallHierarchyIncomingCall> =
+        serde_json::from_value(Value::Array(arr.clone()))
+            .context("failed to parse CallHierarchyIncomingCall[]")?;
+
+    let mut out = Vec::new();
+    for c in calls {
+        let Ok(from) = to_call_hierarchy_item_resolved(&c.from) else {
+            continue;
+        };
+        out.push(CallHierarchyIncomingCallMatch {
+            from,
+            from_ranges: c.from_ranges,
+        });
+    }
+    Ok(out)
+}
+
+pub(crate) fn parse_outgoing_calls(value: Value) -> Result<Vec<CallHierarchyOutgoingCallMatch>> {
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    let Some(arr) = value.as_array() else {
+        return Err(anyhow!("outgoingCalls response is not an array"));
+    };
+    if arr.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let calls: Vec<LspCallHierarchyOutgoingCall> =
+        serde_json::from_value(Value::Array(arr.clone()))
+            .context("failed to parse CallHierarchyOutgoingCall[]")?;
+
+    let mut out = Vec::new();
+    for c in calls {
+        let Ok(to) = to_call_hierarchy_item_resolved(&c.to) else {
+            continue;
+        };
+        out.push(CallHierarchyOutgoingCallMatch {
+            to,
+            from_ranges: c.from_ranges,
+        });
     }
     Ok(out)
 }

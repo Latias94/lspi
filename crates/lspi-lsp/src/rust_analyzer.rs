@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use lspi_core::hashing::sha256_hex;
+use serde::Deserialize;
 use serde_json::Value;
 use tokio::fs;
 use tokio::process::Command;
@@ -15,10 +16,22 @@ use crate::lsp::{
     normalize_workspace_edit,
 };
 use crate::symbol::{
-    DefinitionMatch, FlatSymbol, ReferenceMatch, RenameCandidate, ResolvedLocation, ResolvedSymbol,
-    WorkspaceSymbolMatch, parse_locations, parse_symbols, parse_workspace_symbols, to_lsp_location,
-    to_resolved_location,
+    CallHierarchyIncomingCallMatch, CallHierarchyIncomingResult, CallHierarchyItemResolved,
+    CallHierarchyOutgoingCallMatch, CallHierarchyOutgoingResult, DefinitionMatch, FlatSymbol,
+    ReferenceMatch, RenameCandidate, ResolvedLocation, ResolvedSymbol, WorkspaceSymbolMatch,
+    parse_incoming_calls, parse_locations, parse_outgoing_calls, parse_symbols,
+    parse_workspace_symbols, to_lsp_location, to_resolved_location,
 };
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspCallHierarchyItem {
+    pub name: String,
+    pub kind: u32,
+    pub uri: String,
+    pub range: crate::lsp::LspRange,
+    pub selection_range: crate::lsp::LspRange,
+}
 
 #[derive(Debug, Clone)]
 pub struct RustAnalyzerClientOptions {
@@ -534,6 +547,149 @@ impl RustAnalyzerClient {
         let mut out = parse_workspace_symbols(raw)?;
         out.truncate(max_results.max(1));
         Ok(out)
+    }
+
+    fn parse_call_hierarchy_item_value(&self, value: &Value) -> Result<CallHierarchyItemResolved> {
+        let item: LspCallHierarchyItem =
+            serde_json::from_value(value.clone()).context("failed to parse CallHierarchyItem")?;
+        let loc = crate::lsp::LspLocation {
+            uri: item.uri.clone(),
+            range: item.range.clone(),
+        };
+        let location = to_resolved_location(&loc)?;
+        Ok(CallHierarchyItemResolved {
+            name: item.name,
+            kind: item.kind,
+            location,
+            range: item.range,
+            selection_range: item.selection_range,
+        })
+    }
+
+    async fn prepare_call_hierarchy_with_retry(
+        &self,
+        file_path: &Path,
+        position: LspPosition,
+    ) -> Result<Value> {
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 0..3 {
+            match self
+                .lsp
+                .prepare_call_hierarchy(file_path, position.clone())
+                .await
+            {
+                Ok(v) => return Ok(v),
+                Err(e) => {
+                    last_err = Some(e);
+                    tokio::time::sleep(Duration::from_millis(200 * (attempt + 1) as u64)).await;
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow!("prepareCallHierarchy failed")))
+    }
+
+    pub async fn incoming_calls_at(
+        &self,
+        file_path: &Path,
+        position: LspPosition,
+        max_results: usize,
+    ) -> Result<CallHierarchyIncomingResult> {
+        self.open_or_sync(file_path, "rust").await?;
+        let _ = self.wait_quiescent().await?;
+
+        let prepared = self
+            .prepare_call_hierarchy_with_retry(file_path, position)
+            .await?;
+
+        let Some(items) = prepared.as_array() else {
+            return Ok(CallHierarchyIncomingResult {
+                target: None,
+                calls: Vec::new(),
+            });
+        };
+        if items.is_empty() {
+            return Ok(CallHierarchyIncomingResult {
+                target: None,
+                calls: Vec::new(),
+            });
+        }
+
+        let mut last_err: Option<anyhow::Error> = None;
+        let mut target: Option<CallHierarchyItemResolved> = None;
+        let mut calls: Option<Vec<CallHierarchyIncomingCallMatch>> = None;
+
+        for item in items {
+            target = self.parse_call_hierarchy_item_value(item).ok();
+            match self.lsp.call_hierarchy_incoming_calls(item).await {
+                Ok(raw) => {
+                    let mut parsed = parse_incoming_calls(raw)?;
+                    parsed.truncate(max_results.max(1));
+                    calls = Some(parsed);
+                    if calls.as_ref().is_some_and(|c| !c.is_empty()) {
+                        break;
+                    }
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        let Some(calls) = calls else {
+            return Err(last_err.unwrap_or_else(|| anyhow!("incomingCalls failed")));
+        };
+
+        Ok(CallHierarchyIncomingResult { target, calls })
+    }
+
+    pub async fn outgoing_calls_at(
+        &self,
+        file_path: &Path,
+        position: LspPosition,
+        max_results: usize,
+    ) -> Result<CallHierarchyOutgoingResult> {
+        self.open_or_sync(file_path, "rust").await?;
+        let _ = self.wait_quiescent().await?;
+
+        let prepared = self
+            .prepare_call_hierarchy_with_retry(file_path, position)
+            .await?;
+
+        let Some(items) = prepared.as_array() else {
+            return Ok(CallHierarchyOutgoingResult {
+                target: None,
+                calls: Vec::new(),
+            });
+        };
+        if items.is_empty() {
+            return Ok(CallHierarchyOutgoingResult {
+                target: None,
+                calls: Vec::new(),
+            });
+        }
+
+        let mut last_err: Option<anyhow::Error> = None;
+        let mut target: Option<CallHierarchyItemResolved> = None;
+        let mut calls: Option<Vec<CallHierarchyOutgoingCallMatch>> = None;
+
+        for item in items {
+            target = self.parse_call_hierarchy_item_value(item).ok();
+            match self.lsp.call_hierarchy_outgoing_calls(item).await {
+                Ok(raw) => {
+                    let mut parsed = parse_outgoing_calls(raw)?;
+                    parsed.truncate(max_results.max(1));
+                    calls = Some(parsed);
+                    if calls.as_ref().is_some_and(|c| !c.is_empty()) {
+                        break;
+                    }
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        let Some(calls) = calls else {
+            return Err(last_err.unwrap_or_else(|| anyhow!("outgoingCalls failed")));
+        };
+
+        Ok(CallHierarchyOutgoingResult { target, calls })
     }
 
     pub async fn find_references_by_name(

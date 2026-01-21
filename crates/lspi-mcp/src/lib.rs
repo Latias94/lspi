@@ -70,6 +70,8 @@ impl LspiMcpServer {
                 tool_hover_at(),
                 tool_find_implementation_at(),
                 tool_find_type_definition_at(),
+                tool_find_incoming_calls_at(),
+                tool_find_outgoing_calls_at(),
                 tool_get_document_symbols(),
                 tool_search_workspace_symbols(),
                 tool_rename_symbol(),
@@ -259,6 +261,8 @@ impl ServerHandler for LspiMcpServer {
             "hover_at" => self.hover_at(request).await,
             "find_implementation_at" => self.find_implementation_at(request).await,
             "find_type_definition_at" => self.find_type_definition_at(request).await,
+            "find_incoming_calls_at" => self.find_incoming_calls_at(request).await,
+            "find_outgoing_calls_at" => self.find_outgoing_calls_at(request).await,
             "get_document_symbols" => self.get_document_symbols(request).await,
             "search_workspace_symbols" => self.search_workspace_symbols(request).await,
             "get_diagnostics" => self.get_diagnostics(request).await,
@@ -520,6 +524,28 @@ struct FindTypeDefinitionAtArgs {
 }
 
 #[derive(Debug, Deserialize)]
+struct FindIncomingCallsAtArgs {
+    file_path: String,
+    line: u32,
+    character: u32,
+    #[serde(default)]
+    max_results: Option<usize>,
+    #[serde(default)]
+    max_total_chars: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FindOutgoingCallsAtArgs {
+    file_path: String,
+    line: u32,
+    character: u32,
+    #[serde(default)]
+    max_results: Option<usize>,
+    #[serde(default)]
+    max_total_chars: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 struct GetDocumentSymbolsArgs {
     file_path: String,
     #[serde(default)]
@@ -746,6 +772,46 @@ impl RoutedClient {
             RoutedClient::OmniSharp { client, .. } => {
                 client
                     .type_definition_at(file_path, position, max_results)
+                    .await
+            }
+        }
+    }
+
+    async fn incoming_calls_at(
+        &self,
+        file_path: &Path,
+        position: lspi_lsp::LspPosition,
+        max_results: usize,
+    ) -> anyhow::Result<lspi_lsp::CallHierarchyIncomingResult> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .incoming_calls_at(file_path, position, max_results)
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .incoming_calls_at(file_path, position, max_results)
+                    .await
+            }
+        }
+    }
+
+    async fn outgoing_calls_at(
+        &self,
+        file_path: &Path,
+        position: lspi_lsp::LspPosition,
+        max_results: usize,
+    ) -> anyhow::Result<lspi_lsp::CallHierarchyOutgoingResult> {
+        match self {
+            RoutedClient::Rust { client, .. } => {
+                client
+                    .outgoing_calls_at(file_path, position, max_results)
+                    .await
+            }
+            RoutedClient::OmniSharp { client, .. } => {
+                client
+                    .outgoing_calls_at(file_path, position, max_results)
                     .await
             }
         }
@@ -2102,6 +2168,378 @@ impl LspiMcpServer {
                 structured_content["type_definition_locations"]
                     .as_u64()
                     .unwrap_or(0)
+            ))],
+            structured_content: Some(structured_content),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
+    async fn find_incoming_calls_at(
+        &self,
+        request: CallToolRequestParam,
+    ) -> Result<CallToolResult, McpError> {
+        let args: FindIncomingCallsAtArgs = parse_arguments(request.arguments)?;
+
+        let max_results = args.max_results.unwrap_or(200).clamp(1, 2000);
+        let (max_total_chars, max_total_chars_warning) =
+            effective_max_total_chars(&self.state.config, args.max_total_chars);
+
+        let file_path = PathBuf::from(&args.file_path);
+        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
+
+        let file_bytes = tokio::fs::read(&abs_file)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let file_text = String::from_utf8(file_bytes)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let best_guess = lspi_core::position_fuzz::LspPosition {
+            line: args.line.saturating_sub(1),
+            character: args.character.saturating_sub(1),
+        };
+
+        let limits = lspi_core::position_fuzz::CandidateLimits::default();
+        let candidates = lspi_core::position_fuzz::candidate_lsp_positions(
+            &file_text,
+            args.line,
+            args.character,
+            limits,
+        )
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let mut last_err: Option<anyhow::Error> = None;
+        let mut used_pos: Option<lspi_lsp::LspPosition> = None;
+        let mut result: Option<lspi_lsp::CallHierarchyIncomingResult> = None;
+
+        for c in candidates {
+            let pos = lspi_lsp::LspPosition {
+                line: c.line,
+                character: c.character,
+            };
+            match routed
+                .incoming_calls_at(&abs_file, pos.clone(), max_results)
+                .await
+            {
+                Ok(r) => {
+                    used_pos = Some(pos);
+                    if !r.calls.is_empty() {
+                        result = Some(r);
+                        break;
+                    }
+                    result = Some(r);
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        let Some(result) = result else {
+            let method_not_supported = last_err
+                .as_ref()
+                .map(is_method_not_found_error)
+                .unwrap_or(false);
+            if method_not_supported {
+                return Ok(CallToolResult {
+                    content: vec![Content::text(
+                        "Call hierarchy is not supported by this language server.",
+                    )],
+                    structured_content: Some(json!({
+                        "ok": true,
+                        "tool": "find_incoming_calls_at",
+                        "server_id": server_id,
+                        "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
+                        "target": null,
+                        "call_count": 0,
+                        "calls": [],
+                        "warnings": [{
+                            "kind": "method_not_supported",
+                            "message": "callHierarchy is not supported by this server."
+                        }],
+                        "truncated": false
+                    })),
+                    is_error: Some(false),
+                    meta: None,
+                });
+            }
+
+            return Ok(CallToolResult {
+                content: vec![Content::text(
+                    "Call hierarchy lookup failed at the provided position.",
+                )],
+                structured_content: Some(json!({
+                    "ok": false,
+                    "tool": "find_incoming_calls_at",
+                    "message": "call hierarchy lookup failed",
+                    "error": last_err.map(|e| e.to_string()),
+                })),
+                is_error: Some(true),
+                meta: None,
+            });
+        };
+
+        let item_to_json = |item: &lspi_lsp::CallHierarchyItemResolved| {
+            json!({
+                "name": &item.name,
+                "kind": item.kind,
+                "location": {
+                    "file_path": &item.location.file_path,
+                    "uri": &item.location.uri,
+                    "range": &item.location.range,
+                    "range_1based": lsp_range_1based(&item.location.range)
+                },
+                "range": &item.range,
+                "range_1based": lsp_range_1based(&item.range),
+                "selection_range": &item.selection_range,
+                "selection_range_1based": lsp_range_1based(&item.selection_range),
+                "selection_start_1based": lsp_position_1based(&item.selection_range.start)
+            })
+        };
+
+        let mut calls = Vec::new();
+        for c in result.calls.into_iter().take(max_results.max(1)) {
+            let mut from_ranges = Vec::new();
+            for r in c.from_ranges {
+                let range_1based = lsp_range_1based(&r);
+                from_ranges.push(json!({
+                    "range": r,
+                    "range_1based": range_1based
+                }));
+            }
+            calls.push(json!({
+                "from": item_to_json(&c.from),
+                "from_ranges": from_ranges
+            }));
+        }
+
+        let mut warnings = Vec::<Value>::new();
+        if let Some(used) = used_pos.clone()
+            && (used.line != best_guess.line || used.character != best_guess.character)
+        {
+            warnings.push(json!({
+                "kind": "position_fuzzing",
+                "message": "Applied bounded position fuzzing to locate the symbol position.",
+                "input": { "line": args.line, "character": args.character },
+                "used_lsp_position": { "line": used.line, "character": used.character }
+            }));
+        }
+        if let Some(w) = max_total_chars_warning {
+            warnings.push(w);
+        }
+
+        let mut structured_content = json!({
+            "ok": true,
+            "tool": "find_incoming_calls_at",
+            "server_id": server_id,
+            "input": {
+                "file_path": args.file_path,
+                "line": args.line,
+                "character": args.character,
+                "max_results": max_results,
+                "max_total_chars": max_total_chars
+            },
+            "used_lsp_position": used_pos.map(|p| json!({"line": p.line, "character": p.character})),
+            "target": result.target.as_ref().map(item_to_json),
+            "call_count": calls.len(),
+            "calls": calls,
+            "warnings": warnings,
+            "truncated": false
+        });
+        enforce_global_output_caps(max_total_chars, false, &mut structured_content);
+
+        Ok(CallToolResult {
+            content: vec![Content::text(format!(
+                "Found {} incoming calls.",
+                structured_content["call_count"].as_u64().unwrap_or(0)
+            ))],
+            structured_content: Some(structured_content),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
+    async fn find_outgoing_calls_at(
+        &self,
+        request: CallToolRequestParam,
+    ) -> Result<CallToolResult, McpError> {
+        let args: FindOutgoingCallsAtArgs = parse_arguments(request.arguments)?;
+
+        let max_results = args.max_results.unwrap_or(200).clamp(1, 2000);
+        let (max_total_chars, max_total_chars_warning) =
+            effective_max_total_chars(&self.state.config, args.max_total_chars);
+
+        let file_path = PathBuf::from(&args.file_path);
+        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let routed = self.client_for_file(&abs_file).await?;
+        let server_id = routed.server_id().to_string();
+
+        let file_bytes = tokio::fs::read(&abs_file)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let file_text = String::from_utf8(file_bytes)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let best_guess = lspi_core::position_fuzz::LspPosition {
+            line: args.line.saturating_sub(1),
+            character: args.character.saturating_sub(1),
+        };
+
+        let limits = lspi_core::position_fuzz::CandidateLimits::default();
+        let candidates = lspi_core::position_fuzz::candidate_lsp_positions(
+            &file_text,
+            args.line,
+            args.character,
+            limits,
+        )
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let mut last_err: Option<anyhow::Error> = None;
+        let mut used_pos: Option<lspi_lsp::LspPosition> = None;
+        let mut result: Option<lspi_lsp::CallHierarchyOutgoingResult> = None;
+
+        for c in candidates {
+            let pos = lspi_lsp::LspPosition {
+                line: c.line,
+                character: c.character,
+            };
+            match routed
+                .outgoing_calls_at(&abs_file, pos.clone(), max_results)
+                .await
+            {
+                Ok(r) => {
+                    used_pos = Some(pos);
+                    if !r.calls.is_empty() {
+                        result = Some(r);
+                        break;
+                    }
+                    result = Some(r);
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+
+        let Some(result) = result else {
+            let method_not_supported = last_err
+                .as_ref()
+                .map(is_method_not_found_error)
+                .unwrap_or(false);
+            if method_not_supported {
+                return Ok(CallToolResult {
+                    content: vec![Content::text(
+                        "Call hierarchy is not supported by this language server.",
+                    )],
+                    structured_content: Some(json!({
+                        "ok": true,
+                        "tool": "find_outgoing_calls_at",
+                        "server_id": server_id,
+                        "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
+                        "target": null,
+                        "call_count": 0,
+                        "calls": [],
+                        "warnings": [{
+                            "kind": "method_not_supported",
+                            "message": "callHierarchy is not supported by this server."
+                        }],
+                        "truncated": false
+                    })),
+                    is_error: Some(false),
+                    meta: None,
+                });
+            }
+
+            return Ok(CallToolResult {
+                content: vec![Content::text(
+                    "Call hierarchy lookup failed at the provided position.",
+                )],
+                structured_content: Some(json!({
+                    "ok": false,
+                    "tool": "find_outgoing_calls_at",
+                    "message": "call hierarchy lookup failed",
+                    "error": last_err.map(|e| e.to_string()),
+                })),
+                is_error: Some(true),
+                meta: None,
+            });
+        };
+
+        let item_to_json = |item: &lspi_lsp::CallHierarchyItemResolved| {
+            json!({
+                "name": &item.name,
+                "kind": item.kind,
+                "location": {
+                    "file_path": &item.location.file_path,
+                    "uri": &item.location.uri,
+                    "range": &item.location.range,
+                    "range_1based": lsp_range_1based(&item.location.range)
+                },
+                "range": &item.range,
+                "range_1based": lsp_range_1based(&item.range),
+                "selection_range": &item.selection_range,
+                "selection_range_1based": lsp_range_1based(&item.selection_range),
+                "selection_start_1based": lsp_position_1based(&item.selection_range.start)
+            })
+        };
+
+        let mut calls = Vec::new();
+        for c in result.calls.into_iter().take(max_results.max(1)) {
+            let mut from_ranges = Vec::new();
+            for r in c.from_ranges {
+                let range_1based = lsp_range_1based(&r);
+                from_ranges.push(json!({
+                    "range": r,
+                    "range_1based": range_1based
+                }));
+            }
+            calls.push(json!({
+                "to": item_to_json(&c.to),
+                "from_ranges": from_ranges
+            }));
+        }
+
+        let mut warnings = Vec::<Value>::new();
+        if let Some(used) = used_pos.clone()
+            && (used.line != best_guess.line || used.character != best_guess.character)
+        {
+            warnings.push(json!({
+                "kind": "position_fuzzing",
+                "message": "Applied bounded position fuzzing to locate the symbol position.",
+                "input": { "line": args.line, "character": args.character },
+                "used_lsp_position": { "line": used.line, "character": used.character }
+            }));
+        }
+        if let Some(w) = max_total_chars_warning {
+            warnings.push(w);
+        }
+
+        let mut structured_content = json!({
+            "ok": true,
+            "tool": "find_outgoing_calls_at",
+            "server_id": server_id,
+            "input": {
+                "file_path": args.file_path,
+                "line": args.line,
+                "character": args.character,
+                "max_results": max_results,
+                "max_total_chars": max_total_chars
+            },
+            "used_lsp_position": used_pos.map(|p| json!({"line": p.line, "character": p.character})),
+            "target": result.target.as_ref().map(item_to_json),
+            "call_count": calls.len(),
+            "calls": calls,
+            "warnings": warnings,
+            "truncated": false
+        });
+        enforce_global_output_caps(max_total_chars, false, &mut structured_content);
+
+        Ok(CallToolResult {
+            content: vec![Content::text(format!(
+                "Found {} outgoing calls.",
+                structured_content["call_count"].as_u64().unwrap_or(0)
             ))],
             structured_content: Some(structured_content),
             is_error: Some(false),
@@ -4127,6 +4565,44 @@ fn tool_find_type_definition_at() -> Tool {
                 "line": { "type": "integer", "minimum": 1 },
                 "character": { "type": "integer", "minimum": 1 },
                 "max_results": { "type": "integer", "minimum": 1, "default": 50 },
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 }
+            },
+            "required": ["file_path", "line", "character"],
+            "additionalProperties": false
+        }))),
+    )
+}
+
+fn tool_find_incoming_calls_at() -> Tool {
+    Tool::new(
+        Cow::Borrowed("find_incoming_calls_at"),
+        Cow::Borrowed("Find incoming calls (call hierarchy) at a specific 1-based position."),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 1 },
+                "character": { "type": "integer", "minimum": 1 },
+                "max_results": { "type": "integer", "minimum": 1, "default": 200 },
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 }
+            },
+            "required": ["file_path", "line", "character"],
+            "additionalProperties": false
+        }))),
+    )
+}
+
+fn tool_find_outgoing_calls_at() -> Tool {
+    Tool::new(
+        Cow::Borrowed("find_outgoing_calls_at"),
+        Cow::Borrowed("Find outgoing calls (call hierarchy) at a specific 1-based position."),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "file_path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 1 },
+                "character": { "type": "integer", "minimum": 1 },
+                "max_results": { "type": "integer", "minimum": 1, "default": 200 },
                 "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 }
             },
             "required": ["file_path", "line", "character"],

@@ -15,6 +15,7 @@ metadata:
 ## When to use
 
 - You need semantic navigation: definition / references / implementation / type definition.
+- You need call graph insights: incoming calls / outgoing calls (call hierarchy).
 - You need quick type/doc info at a cursor: hover.
 - You want to list symbols in a file or search symbols across the workspace.
 - You want a safe rename workflow (preview first, apply only when confirmed).
@@ -52,8 +53,9 @@ metadata:
   - `find_references` / `find_references_at`
   - `find_implementation_at`
   - `find_type_definition_at`
+  - `find_incoming_calls_at`
+  - `find_outgoing_calls_at`
   - `get_diagnostics`
 - Control:
   - `restart_server`
   - `stop_server`
-
