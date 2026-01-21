@@ -1,0 +1,10 @@
+{
+  "name": "lspi-ts-hello",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "typescript-language-server": "^4.0.0"
+  }
+}

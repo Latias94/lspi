@@ -148,3 +148,29 @@ Notes:
 ```powershell
 pwsh scripts/mcp_smoke_csharp.ps1 -SkipIfMissing:$false
 ```
+
+## TypeScript (generic LSP) smoke test
+
+This repository includes a minimal TypeScript project at `samples/typescript/Hello/` and a smoke script:
+
+```powershell
+pwsh scripts/mcp_smoke_ts.ps1
+```
+
+Run against a real TypeScript project:
+
+```powershell
+pwsh scripts/mcp_smoke_ts.ps1 -WorkspaceRoot C:\path\to\my-ts-project
+```
+
+Prerequisites (best-effort):
+
+- `node` + `npm` available on `PATH`
+- `typescript-language-server` available either:
+  - locally under `<project>/node_modules/.bin/` (recommended), or
+  - globally on `PATH`
+
+Notes:
+
+- The script defaults to `-SkipIfMissing` so it does not fail if prerequisites are missing.
+- If your project has `package.json` but no `node_modules`, either run `npm install` first or pass `-InstallDeps`.

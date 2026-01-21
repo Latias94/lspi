@@ -15,6 +15,7 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
 - Basic user docs: `README.md`, `docs/CONFIG.md`
 - Manual smoke test doc: `docs/SMOKE_TEST.md`
 - Smoke test helper script: `scripts/mcp_smoke.ps1`
+- TypeScript smoke test helper script: `scripts/mcp_smoke_ts.ps1` (generic LSP)
 - Codex integration doc: `docs/CODEX.md`
 - MCP stdio server entrypoint (`lspi mcp`)
 - Windows smoke test: `scripts/mcp_smoke.ps1` passes with rust-analyzer 1.92.0 (2025-12-08)

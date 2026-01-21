@@ -9,6 +9,7 @@ Current focus:
 - Rust via `rust-analyzer`
 - C# via OmniSharp (`omnisharp -lsp`)
 - Generic stdio LSP (`kind = "generic"`, experimental)
+- TypeScript via `typescript-language-server` (through `kind = "generic"`)
 
 ## Status
 
