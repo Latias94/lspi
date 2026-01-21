@@ -158,8 +158,8 @@ Note: installing `lspi` via `cargo install` does not install this skill; it's ju
 - `hover_at`
 - `find_implementation_at`
 - `find_type_definition_at`
-- `find_incoming_calls_at`
-- `find_outgoing_calls_at`
+- `find_incoming_calls`, `find_incoming_calls_at`
+- `find_outgoing_calls`, `find_outgoing_calls_at`
 - `get_document_symbols`
 - `search_workspace_symbols`
 - `rename_symbol`, `rename_symbol_strict`

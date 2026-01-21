@@ -43,6 +43,7 @@ This document tracks what is implemented vs planned, in a lightweight, append-on
   - `find_type_definition_at` (by position, with bounded position fuzzing; best-effort if not supported)
   - `find_incoming_calls_at` (by position, with bounded position fuzzing; best-effort if not supported)
   - `find_outgoing_calls_at` (by position, with bounded position fuzzing; best-effort if not supported)
+  - `find_incoming_calls` / `find_outgoing_calls` (by name; returns candidates when ambiguous)
   - `get_document_symbols` (flat list; includes 1-based ranges)
   - `search_workspace_symbols` (workspace-wide symbol search; requires disambiguation when multiple servers are configured)
   - `get_diagnostics` (from publishDiagnostics cache; best-effort wait)

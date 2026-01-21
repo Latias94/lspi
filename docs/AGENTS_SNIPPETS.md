@@ -27,8 +27,8 @@ This document provides copy-paste prompt snippets you can add to your project's 
   - `hover_at`
   - `find_implementation_at`
   - `find_type_definition_at`
-  - `find_incoming_calls_at`
-  - `find_outgoing_calls_at`
+  - `find_incoming_calls` / `find_incoming_calls_at`
+  - `find_outgoing_calls` / `find_outgoing_calls_at`
   - `get_document_symbols`
   - `search_workspace_symbols`
   - `rename_symbol`, `rename_symbol_strict`
@@ -59,8 +59,8 @@ You can paste the following into your project's `AGENTS.md`:
   - hover_at
   - find_implementation_at
   - find_type_definition_at
-  - find_incoming_calls_at
-  - find_outgoing_calls_at
+  - find_incoming_calls / find_incoming_calls_at
+  - find_outgoing_calls / find_outgoing_calls_at
   - get_document_symbols
   - search_workspace_symbols
   - rename_symbol / rename_symbol_strict

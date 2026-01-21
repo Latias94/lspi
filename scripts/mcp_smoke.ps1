@@ -404,10 +404,48 @@ try {
   Assert-ToolOk $wsSymResp "search_workspace_symbols"
   Write-Host ("search_workspace_symbols => " + ($wsSymResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
 
-  Write-Host "tools/call find_incoming_calls_at ..." -ForegroundColor Cyan
+  Write-Host "tools/call find_incoming_calls (by name) ..." -ForegroundColor Cyan
   Write-JsonLine $stdin @{
     jsonrpc = "2.0"
     id = 12
+    method = "tools/call"
+    params = @{
+      name = "find_incoming_calls"
+      arguments = @{
+        file_path = "crates/lspi-mcp/src/lib.rs"
+        symbol_name = "run_stdio_with_options"
+        max_results = 50
+      }
+    }
+  }
+  $inCallsResp = Read-ResponseById $stdout 12 $TimeoutSeconds
+  Assert-NoJsonRpcError $inCallsResp "find_incoming_calls"
+  Assert-ToolOk $inCallsResp "find_incoming_calls"
+  Write-Host ("find_incoming_calls => " + ($inCallsResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
+
+  Write-Host "tools/call find_outgoing_calls (by name) ..." -ForegroundColor Cyan
+  Write-JsonLine $stdin @{
+    jsonrpc = "2.0"
+    id = 13
+    method = "tools/call"
+    params = @{
+      name = "find_outgoing_calls"
+      arguments = @{
+        file_path = "crates/lspi-mcp/src/lib.rs"
+        symbol_name = "run_stdio_with_options"
+        max_results = 50
+      }
+    }
+  }
+  $outCallsResp = Read-ResponseById $stdout 13 $TimeoutSeconds
+  Assert-NoJsonRpcError $outCallsResp "find_outgoing_calls"
+  Assert-ToolOk $outCallsResp "find_outgoing_calls"
+  Write-Host ("find_outgoing_calls => " + ($outCallsResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
+
+  Write-Host "tools/call find_incoming_calls_at ..." -ForegroundColor Cyan
+  Write-JsonLine $stdin @{
+    jsonrpc = "2.0"
+    id = 14
     method = "tools/call"
     params = @{
       name = "find_incoming_calls_at"
@@ -419,15 +457,15 @@ try {
       }
     }
   }
-  $inCallsResp = Read-ResponseById $stdout 12 $TimeoutSeconds
-  Assert-NoJsonRpcError $inCallsResp "find_incoming_calls_at"
-  Assert-ToolOk $inCallsResp "find_incoming_calls_at"
-  Write-Host ("find_incoming_calls_at => " + ($inCallsResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
+  $inCallsAtResp = Read-ResponseById $stdout 14 $TimeoutSeconds
+  Assert-NoJsonRpcError $inCallsAtResp "find_incoming_calls_at"
+  Assert-ToolOk $inCallsAtResp "find_incoming_calls_at"
+  Write-Host ("find_incoming_calls_at => " + ($inCallsAtResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
 
   Write-Host "tools/call find_outgoing_calls_at ..." -ForegroundColor Cyan
   Write-JsonLine $stdin @{
     jsonrpc = "2.0"
-    id = 13
+    id = 15
     method = "tools/call"
     params = @{
       name = "find_outgoing_calls_at"
@@ -439,10 +477,10 @@ try {
       }
     }
   }
-  $outCallsResp = Read-ResponseById $stdout 13 $TimeoutSeconds
-  Assert-NoJsonRpcError $outCallsResp "find_outgoing_calls_at"
-  Assert-ToolOk $outCallsResp "find_outgoing_calls_at"
-  Write-Host ("find_outgoing_calls_at => " + ($outCallsResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
+  $outCallsAtResp = Read-ResponseById $stdout 15 $TimeoutSeconds
+  Assert-NoJsonRpcError $outCallsAtResp "find_outgoing_calls_at"
+  Assert-ToolOk $outCallsAtResp "find_outgoing_calls_at"
+  Write-Host ("find_outgoing_calls_at => " + ($outCallsAtResp | ConvertTo-Json -Compress -Depth 10)) -ForegroundColor DarkGray
 
   Write-Host "OK" -ForegroundColor Green
 } finally {

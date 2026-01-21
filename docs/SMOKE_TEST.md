@@ -29,7 +29,7 @@ $req = @'
 $req | cargo run -p lspi -- mcp --workspace-root .
 ```
 
-Expected: the response includes `find_definition`, `find_definition_at`, `find_references`, `find_references_at`, `hover_at`, `find_implementation_at`, `find_type_definition_at`, `find_incoming_calls_at`, `find_outgoing_calls_at`, `get_document_symbols`, `search_workspace_symbols`, `rename_symbol`, `rename_symbol_strict`, `get_diagnostics`, `restart_server`, `stop_server`.
+Expected: the response includes `find_definition`, `find_definition_at`, `find_references`, `find_references_at`, `hover_at`, `find_implementation_at`, `find_type_definition_at`, `find_incoming_calls`, `find_outgoing_calls`, `find_incoming_calls_at`, `find_outgoing_calls_at`, `get_document_symbols`, `search_workspace_symbols`, `rename_symbol`, `rename_symbol_strict`, `get_diagnostics`, `restart_server`, `stop_server`.
 
 ## Run `find_definition` / `find_references` (by name)
 

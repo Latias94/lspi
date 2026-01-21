@@ -171,7 +171,8 @@ impl RustAnalyzerClient {
 
     async fn document_symbols_with_retry(&self, file_path: &Path) -> Result<Vec<FlatSymbol>> {
         let mut last_err: Option<anyhow::Error> = None;
-        for attempt in 0..3 {
+        let mut delay_ms = 200u64;
+        for attempt in 0..10 {
             match self.lsp.document_symbols(file_path).await {
                 Ok(value) => match parse_symbols(value) {
                     Ok(symbols) => {
@@ -181,7 +182,8 @@ impl RustAnalyzerClient {
                         if attempt == 0 {
                             let _ = self.wait_quiescent().await?;
                         }
-                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                        delay_ms = (delay_ms + 200).min(1_000);
                     }
                     Err(e) => last_err = Some(e),
                 },
