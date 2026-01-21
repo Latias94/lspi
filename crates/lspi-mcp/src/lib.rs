@@ -61,27 +61,30 @@ impl LspiMcpServer {
         )?;
         let servers = lspi_core::config::resolved_servers(&loaded.config, &loaded.workspace_root);
 
+        let all_tools = vec![
+            tool_find_definition(),
+            tool_find_definition_at(),
+            tool_find_references(),
+            tool_find_references_at(),
+            tool_hover_at(),
+            tool_find_implementation_at(),
+            tool_find_type_definition_at(),
+            tool_find_incoming_calls(),
+            tool_find_outgoing_calls(),
+            tool_find_incoming_calls_at(),
+            tool_find_outgoing_calls_at(),
+            tool_get_document_symbols(),
+            tool_search_workspace_symbols(),
+            tool_rename_symbol(),
+            tool_rename_symbol_strict(),
+            tool_get_diagnostics(),
+            tool_restart_server(),
+            tool_stop_server(),
+        ];
+        let tools = filter_tools_by_config(all_tools, loaded.config.mcp.as_ref());
+
         let server = Self {
-            tools: Arc::new(vec![
-                tool_find_definition(),
-                tool_find_definition_at(),
-                tool_find_references(),
-                tool_find_references_at(),
-                tool_hover_at(),
-                tool_find_implementation_at(),
-                tool_find_type_definition_at(),
-                tool_find_incoming_calls(),
-                tool_find_outgoing_calls(),
-                tool_find_incoming_calls_at(),
-                tool_find_outgoing_calls_at(),
-                tool_get_document_symbols(),
-                tool_search_workspace_symbols(),
-                tool_rename_symbol(),
-                tool_rename_symbol_strict(),
-                tool_get_diagnostics(),
-                tool_restart_server(),
-                tool_stop_server(),
-            ]),
+            tools: Arc::new(tools),
             state: Arc::new(LspiState {
                 workspace_root: loaded.workspace_root,
                 config: loaded.config,
@@ -288,6 +291,70 @@ impl ServerHandler for LspiMcpServer {
             }),
         }
     }
+}
+
+fn filter_tools_by_config(
+    tools: Vec<Tool>,
+    mcp: Option<&lspi_core::config::McpConfig>,
+) -> Vec<Tool> {
+    let Some(tools_cfg) = mcp.and_then(|m| m.tools.as_ref()) else {
+        return tools;
+    };
+
+    let normalize = |s: &str| s.trim().to_ascii_lowercase();
+    let known: std::collections::HashSet<String> = tools
+        .iter()
+        .map(|t| normalize(t.name.as_ref()))
+        .filter(|n| !n.is_empty())
+        .collect();
+    let mut allow_set = std::collections::HashSet::<String>::new();
+    if let Some(list) = tools_cfg.allow.as_ref() {
+        for item in list {
+            let n = normalize(item);
+            if !n.is_empty() {
+                allow_set.insert(n);
+            }
+        }
+    }
+
+    let mut exclude_set = std::collections::HashSet::<String>::new();
+    if let Some(list) = tools_cfg.exclude.as_ref() {
+        for item in list {
+            let n = normalize(item);
+            if !n.is_empty() {
+                exclude_set.insert(n);
+            }
+        }
+    }
+
+    let has_allow = !allow_set.is_empty();
+
+    let filtered: Vec<Tool> = tools
+        .into_iter()
+        .filter(|tool| {
+            let name = normalize(tool.name.as_ref());
+            if has_allow {
+                return allow_set.contains(&name);
+            }
+            !exclude_set.contains(&name)
+        })
+        .collect();
+
+    if has_allow {
+        for wanted in allow_set {
+            if !known.contains(&wanted) {
+                warn!("mcp.tools.allow includes unknown tool: {wanted}");
+            }
+        }
+    } else {
+        for denied in exclude_set {
+            if !known.contains(&denied) {
+                warn!("mcp.tools.exclude includes unknown tool: {denied}");
+            }
+        }
+    }
+
+    filtered
 }
 
 struct ManagedClient<T> {

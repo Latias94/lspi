@@ -56,6 +56,19 @@ pub struct LspServerConfig {
 pub struct McpConfig {
     #[serde(default)]
     pub output: Option<McpOutputConfig>,
+    #[serde(default)]
+    pub tools: Option<McpToolsConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct McpToolsConfig {
+    /// If set and non-empty, only these tools are exposed through MCP.
+    #[serde(default)]
+    pub allow: Option<Vec<String>>,
+    /// Tools to exclude from MCP exposure (ignored when `allow` is set and non-empty).
+    #[serde(default)]
+    pub exclude: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -410,6 +423,49 @@ root_dir = "crates"
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].id, "ra");
         assert!(servers[0].root_dir.ends_with("crates"));
+    }
+
+    #[test]
+    fn toml_parses_mcp_tools_allow_and_exclude() {
+        let toml = r#"
+[mcp.tools]
+allow = ["find_definition_at", "find_references_at"]
+exclude = ["rename_symbol"]
+"#;
+        let config: LspiConfig = toml::from_str(toml).unwrap();
+        let tools = config.mcp.unwrap().tools.unwrap();
+        assert_eq!(
+            tools.allow.unwrap(),
+            vec![
+                "find_definition_at".to_string(),
+                "find_references_at".to_string()
+            ]
+        );
+        assert_eq!(tools.exclude.unwrap(), vec!["rename_symbol".to_string()]);
+    }
+
+    #[test]
+    fn json_parses_mcp_tools_allow_and_exclude() {
+        let json = r#"
+{
+  "mcp": {
+    "tools": {
+      "allow": ["find_definition_at", "find_references_at"],
+      "exclude": ["rename_symbol"]
+    }
+  }
+}
+"#;
+        let config: LspiConfig = serde_json::from_str(json).unwrap();
+        let tools = config.mcp.unwrap().tools.unwrap();
+        assert_eq!(
+            tools.allow.unwrap(),
+            vec![
+                "find_definition_at".to_string(),
+                "find_references_at".to_string()
+            ]
+        );
+        assert_eq!(tools.exclude.unwrap(), vec!["rename_symbol".to_string()]);
     }
 
     #[test]

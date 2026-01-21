@@ -166,6 +166,8 @@ Note: installing `lspi` via `cargo install` does not install this skill; it's ju
 - `get_diagnostics`
 - `restart_server`, `stop_server`
 
+If you want a “least privilege” toolset (e.g. read-only navigation), use `mcp.tools` allow/exclude in your config. See `docs/CONFIG.md`.
+
 ## Development
 
 Run MCP server without installing:

@@ -93,6 +93,31 @@ Semantics:
 - If a tool call omits `max_total_chars`, `max_total_chars_default` is used.
 - If a tool call requests `max_total_chars` above the hard cap, it is clamped and a warning is returned.
 
+### `mcp.tools` (optional)
+
+Restrict which tools are exposed through MCP (useful for “least privilege” setups).
+
+```toml
+[mcp.tools]
+# If set and non-empty: only these tools are exposed.
+allow = [
+  "find_definition_at",
+  "find_references_at",
+  "hover_at",
+  "get_document_symbols",
+  "search_workspace_symbols",
+  "get_diagnostics"
+]
+
+# Tools to exclude (ignored when `allow` is set and non-empty).
+# exclude = ["rename_symbol", "rename_symbol_strict"]
+```
+
+Semantics:
+
+- Tool names are matched case-insensitively.
+- `allow` (non-empty) takes precedence over `exclude`.
+
 ## CLI helper
 
 Generate a starter config:
