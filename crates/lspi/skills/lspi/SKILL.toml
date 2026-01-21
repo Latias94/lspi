@@ -1,0 +1,4 @@
+[interface]
+display_name = "lspi"
+short_description = "LSP semantic navigation via MCP"
+default_prompt = "Use lspi MCP tools for symbol-level navigation (hover/definition/references/implementation/typeDefinition) and preview-first renames. Prefer *_at tools with 1-based line/character; add file_path to search_workspace_symbols when multiple servers are configured."

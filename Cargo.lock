@@ -657,6 +657,7 @@ dependencies = [
  "lspi-core",
  "lspi-lsp",
  "lspi-mcp",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

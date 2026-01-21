@@ -78,11 +78,23 @@ To install it globally (so Codex can use it in any repo), copy (or symlink) this
 
 - `~/.codex/skills/lspi/`
 
+Or install it automatically:
+
+```bash
+lspi skill install --scope user
+```
+
 Then, in Codex, ask it to use the `lspi` skill (or select it in a UI that supports skills).
 
 If you prefer repo-scoped installation (per project), copy the folder into your project repo:
 
 - `<your-project>/.codex/skills/lspi/`
+
+Or install it automatically:
+
+```bash
+lspi skill install --scope repo --workspace-root .
+```
 
 Example (macOS/Linux):
 

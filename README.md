@@ -129,6 +129,12 @@ Copy (or symlink) this directory to your Codex skills folder:
 
 - `~/.codex/skills/lspi/`
 
+Or install it automatically:
+
+```bash
+lspi skill install --scope user
+```
+
 Example (macOS/Linux):
 
 ```bash

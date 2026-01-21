@@ -1,10 +1,13 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::collections::VecDeque;
+use std::env;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::process::Command as TokioCommand;
+
+mod skill;
 
 fn is_rust_analyzer_kind(kind: &str) -> bool {
     let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
@@ -71,6 +74,36 @@ enum Command {
         #[arg(long, conflicts_with = "interactive")]
         non_interactive: bool,
     },
+    /// Manage Codex Skills for lspi
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillCommand {
+    /// Install the lspi Codex skill
+    Install {
+        /// Install scope (user or repo)
+        #[arg(long, value_enum, default_value = "user")]
+        scope: SkillInstallScope,
+        /// Override Codex home directory (defaults to $CODEX_HOME or ~/.codex)
+        #[arg(long)]
+        codex_home: Option<PathBuf>,
+        /// Workspace root for repo-scoped install (defaults to current directory)
+        #[arg(long)]
+        workspace_root: Option<PathBuf>,
+        /// Overwrite existing skill files if present
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SkillInstallScope {
+    User,
+    Repo,
 }
 
 #[tokio::main]
@@ -329,7 +362,45 @@ max_total_chars_hard = 2000000
             println!("agents: docs/AGENTS_SNIPPETS.md");
             Ok(())
         }
+        Command::Skill { command } => match command {
+            SkillCommand::Install {
+                scope,
+                codex_home,
+                workspace_root,
+                force,
+            } => {
+                let dest = match scope {
+                    SkillInstallScope::User => {
+                        let codex_home =
+                            codex_home.unwrap_or_else(default_codex_home_dir_or_fallback);
+                        codex_home.join("skills").join("lspi")
+                    }
+                    SkillInstallScope::Repo => {
+                        let workspace_root = workspace_root.unwrap_or_else(|| {
+                            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                        });
+                        let workspace_root =
+                            workspace_root.canonicalize().unwrap_or(workspace_root);
+                        workspace_root.join(".codex").join("skills").join("lspi")
+                    }
+                };
+
+                skill::install_skill(&dest, force)?;
+                println!("installed: {}", dest.display());
+                Ok(())
+            }
+        },
     }
+}
+
+fn default_codex_home_dir_or_fallback() -> PathBuf {
+    if let Ok(v) = env::var("CODEX_HOME") {
+        return PathBuf::from(v);
+    }
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".codex")
 }
 
 fn resolve_interactive(wizard: bool, interactive_flag: bool, non_interactive: bool) -> bool {
