@@ -2,6 +2,8 @@
 
 This is a quick end-to-end sanity check for the **MCP frontend + rust-analyzer backend**.
 
+For C# (OmniSharp), see the dedicated section below.
+
 ## Prerequisites
 
 - `rust-analyzer` available on `PATH`, or set `LSPI_RUST_ANALYZER_COMMAND`.
@@ -109,3 +111,25 @@ pwsh scripts/mcp_smoke.ps1 -WorkspaceRoot .
 The script requires `rust-analyzer` to be installed; it runs `lspi doctor` first and fails fast if missing.
 
 Note: `scripts/mcp_smoke.ps1` is tailored to this repository (it searches for `run_stdio_with_options` in `crates/lspi/src/main.rs`).
+
+## C# (OmniSharp) smoke test
+
+This repository includes a minimal C# project at `samples/csharp/Hello/` and a smoke script:
+
+```powershell
+pwsh scripts/mcp_smoke_csharp.ps1
+```
+
+Prerequisites:
+
+- `dotnet` available on `PATH`
+- `omnisharp` available on `PATH` (or set `LSPI_OMNISHARP_COMMAND`)
+
+Notes:
+
+- The script defaults to `-SkipIfMissing` so it does not fail if OmniSharp is not installed.
+- To fail fast when prerequisites are missing, run:
+
+```powershell
+pwsh scripts/mcp_smoke_csharp.ps1 -SkipIfMissing:$false
+```
