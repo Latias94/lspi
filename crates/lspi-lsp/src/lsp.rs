@@ -488,18 +488,14 @@ impl LspClient {
         params: &T,
         request_timeout: Option<Duration>,
     ) -> Result<Value> {
-        let id = {
+        let (id, rx) = {
+            let (tx, rx) = oneshot::channel();
             let mut state = self.state.lock().await;
             let id = state.next_id;
             state.next_id += 1;
-            id
-        };
-
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut state = self.state.lock().await;
             state.pending.insert(id, tx);
-        }
+            (id, rx)
+        };
 
         let request = serde_json::json!({
             "jsonrpc": "2.0",
@@ -507,13 +503,26 @@ impl LspClient {
             "method": method,
             "params": params,
         });
-        self.write_message(&request).await?;
+        if let Err(err) = self.write_message(&request).await {
+            self.remove_pending(id).await;
+            return Err(err);
+        }
 
         let wait = request_timeout.unwrap_or(self.default_request_timeout);
-        let response_value = timeout(wait, rx)
-            .await
-            .with_context(|| format!("LSP request timed out: {method}"))?
-            .map_err(|_| anyhow!("LSP response channel closed: {method}"))?;
+        let response_value = match timeout(wait, rx).await {
+            Ok(v) => v,
+            Err(_) => {
+                self.remove_pending(id).await;
+                return Err(anyhow!("LSP request timed out: {method}"));
+            }
+        };
+        let response_value = match response_value {
+            Ok(v) => v,
+            Err(_) => {
+                self.remove_pending(id).await;
+                return Err(anyhow!("LSP response channel closed: {method}"));
+            }
+        };
 
         if let Some(error) = response_value.get("error") {
             return Err(anyhow!("LSP error for {method}: {error}"));
@@ -584,6 +593,11 @@ impl LspClient {
         stdin.write_all(&body).await?;
         stdin.flush().await?;
         Ok(())
+    }
+
+    async fn remove_pending(&self, id: i64) {
+        let mut state = self.state.lock().await;
+        state.pending.remove(&id);
     }
 
     fn spawn_stdout_reader(&self, stdout: ChildStdout) {
