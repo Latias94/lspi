@@ -128,10 +128,46 @@ impl LspiMcpServer {
                 .ok_or_else(|| McpError::internal_error("no configured servers", None))?;
             self.client_for_server(server).await?
         } else {
-            return Err(McpError::invalid_params(
-                "multiple servers configured; provide file_path to pick a language server",
-                None,
-            ));
+            let servers = self
+                .state
+                .servers
+                .iter()
+                .map(|s| {
+                    json!({
+                        "id": s.id,
+                        "kind": s.kind,
+                        "extensions": s.extensions,
+                        "root_dir": s.root_dir.to_string_lossy(),
+                        "workspace_folders": s.workspace_folders.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            let mut structured_content = json!({
+                "ok": true,
+                "tool": "search_workspace_symbols",
+                "needs_disambiguation": true,
+                "message": "multiple servers configured; provide file_path to pick a language server",
+                "input": {
+                    "query": args.query,
+                    "file_path": args.file_path,
+                    "max_results": max_results,
+                    "max_total_chars": max_total_chars
+                },
+                "servers": servers,
+                "warnings": [],
+                "truncated": false
+            });
+            enforce_global_output_caps(max_total_chars, false, &mut structured_content);
+
+            return Ok(CallToolResult {
+                content: vec![Content::text(
+                    "Multiple language servers are configured. Provide file_path to select the correct server.",
+                )],
+                structured_content: Some(structured_content),
+                is_error: Some(false),
+                meta: None,
+            });
         };
 
         let server_id = routed.server_id().to_string();
@@ -2315,5 +2351,102 @@ impl LspiMcpServer {
             is_error: Some(false),
             meta: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod search_workspace_symbols_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use rmcp::model::CallToolRequestParam;
+    use serde_json::Value;
+    use tempfile::tempdir;
+    use tokio::sync::Mutex;
+
+    use crate::{LspiMcpServer, LspiState, compute_allowed_roots};
+
+    #[tokio::test]
+    async fn returns_disambiguation_payload_when_multiple_servers_configured() {
+        let root_dir = tempdir().unwrap();
+        let root = root_dir.path().to_path_buf();
+
+        let servers = vec![
+            lspi_core::config::ResolvedServerConfig {
+                id: "ra".to_string(),
+                kind: "rust_analyzer".to_string(),
+                command: None,
+                args: Vec::new(),
+                extensions: vec!["rs".to_string()],
+                language_id: Some("rust".to_string()),
+                root_dir: root.clone(),
+                workspace_folders: Vec::new(),
+                adapter: None,
+                initialize_timeout_ms: None,
+                request_timeout_ms: None,
+                request_timeout_overrides_ms: HashMap::new(),
+                warmup_timeout_ms: None,
+                restart_interval_minutes: None,
+                idle_shutdown_ms: None,
+                initialize_options: None,
+                client_capabilities: None,
+                workspace_configuration: HashMap::new(),
+            },
+            lspi_core::config::ResolvedServerConfig {
+                id: "go".to_string(),
+                kind: "generic".to_string(),
+                command: Some("gopls".to_string()),
+                args: vec!["serve".to_string()],
+                extensions: vec!["go".to_string()],
+                language_id: Some("go".to_string()),
+                root_dir: root.clone(),
+                workspace_folders: Vec::new(),
+                adapter: None,
+                initialize_timeout_ms: None,
+                request_timeout_ms: None,
+                request_timeout_overrides_ms: HashMap::new(),
+                warmup_timeout_ms: None,
+                restart_interval_minutes: None,
+                idle_shutdown_ms: None,
+                initialize_options: None,
+                client_capabilities: None,
+                workspace_configuration: HashMap::new(),
+            },
+        ];
+
+        let allowed_roots = compute_allowed_roots(&root, &servers);
+
+        let server = LspiMcpServer {
+            tools: Arc::new(Vec::new()),
+            state: Arc::new(LspiState {
+                workspace_root: root,
+                allowed_roots,
+                config: lspi_core::config::LspiConfig::default(),
+                servers,
+                rust_analyzer: Mutex::new(HashMap::new()),
+                omnisharp: Mutex::new(HashMap::new()),
+                generic: Mutex::new(HashMap::new()),
+            }),
+        };
+
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("query".to_string(), Value::String("foo".to_string()));
+
+        let out = server
+            .search_workspace_symbols(CallToolRequestParam {
+                name: "search_workspace_symbols".into(),
+                arguments: Some(arguments),
+                task: None,
+            })
+            .await
+            .unwrap();
+
+        let structured = out.structured_content.unwrap();
+        assert_eq!(
+            structured["tool"],
+            Value::String("search_workspace_symbols".to_string())
+        );
+        assert_eq!(structured["needs_disambiguation"], Value::Bool(true));
+        assert!(structured["servers"].as_array().unwrap().len() >= 2);
     }
 }

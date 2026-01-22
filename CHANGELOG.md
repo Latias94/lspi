@@ -23,6 +23,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 - Build: relax dependency version specifiers and upgrade `rmcp` to `0.13`.
 - Repo hygiene: ignore IntelliJ project files (`.idea/`, `*.iml`).
 - Docs: improve MCP-first documentation (README FAQ/troubleshooting, minimal config example, and upstream inspirations).
+- MCP: when multiple servers are configured, `search_workspace_symbols` returns a disambiguation payload (instead of a hard error) so clients can pick a server by providing `file_path`.
 
 ### Added
 
