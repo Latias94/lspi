@@ -9,6 +9,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 ### Fixed
 
 - LSP client: avoid leaking pending requests when a request write fails or times out.
+- LSP client: omit `params` for `shutdown`/`exit` when params is null (improves compatibility with strict servers).
 - MCP: harden backup file path generation to prevent path traversal via `backup_suffix`.
 
 ### Changed
@@ -16,6 +17,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 - MCP tool schemas: add clearer descriptions and default/maximum hints for common parameters (`max_results`, snippet controls).
 - MCP internals: split large modules into smaller files for maintainability (no behavior change intended).
 - LSP client: reply to common server-initiated requests (`workspace/configuration`, `workspace/workspaceFolders`, etc.) to improve generic LSP compatibility.
+- LSP transport: send `Content-Type` header, accept case-insensitive `Content-Length`, and cap maximum frame size.
 - `lspi doctor`: add Pyright preflight hints (`kind=pyright|basedpyright`).
 - Build: relax dependency version specifiers and upgrade `rmcp` to `0.13`.
 - Repo hygiene: ignore IntelliJ project files (`.idea/`, `*.iml`).

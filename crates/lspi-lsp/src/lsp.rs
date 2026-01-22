@@ -13,6 +13,9 @@ use tokio::time::{Duration, timeout};
 use tracing::{debug, warn};
 use url::Url;
 
+const MAX_LSP_MESSAGE_BYTES: usize = 20 * 1024 * 1024;
+const LSP_NO_PARAMS_METHODS: [&str; 2] = ["shutdown", "exit"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LspPosition {
     pub line: u32,
@@ -509,12 +512,8 @@ impl LspClient {
             (id, rx)
         };
 
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        });
+        let params_value = serde_json::to_value(params)?;
+        let request = build_lsp_request(method, id, params_value);
         if let Err(err) = self.write_message(&request).await {
             self.remove_pending(id).await;
             return Err(err);
@@ -549,11 +548,8 @@ impl LspClient {
     }
 
     pub async fn send_notification<T: Serialize>(&self, method: &str, params: &T) -> Result<()> {
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        });
+        let params_value = serde_json::to_value(params)?;
+        let request = build_lsp_notification(method, params_value);
         self.write_message(&request).await
     }
 
@@ -601,7 +597,7 @@ impl LspClient {
         });
 
         let mut params = serde_json::json!({
-            "processId": null,
+            "processId": self.child.id(),
             "rootUri": self.root_uri,
             "capabilities": client_capabilities.cloned().unwrap_or(default_capabilities),
             "workspaceFolders": [
@@ -778,7 +774,10 @@ struct LspMessageContext {
 
 async fn write_message_to(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) -> Result<()> {
     let body = serde_json::to_vec(value)?;
-    let header = format!("Content-Length: {}\r\n\r\n", body.len());
+    let header = format!(
+        "Content-Length: {}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n",
+        body.len()
+    );
     let mut stdin = stdin.lock().await;
     stdin.write_all(header.as_bytes()).await?;
     stdin.write_all(&body).await?;
@@ -887,7 +886,9 @@ async fn read_lsp_message(reader: &mut BufReader<ChildStdout>) -> Result<Option<
             break;
         }
 
-        if let Some(value) = line_trimmed.strip_prefix("Content-Length:") {
+        if let Some((name, value)) = line_trimmed.split_once(':')
+            && name.trim().eq_ignore_ascii_case("content-length")
+        {
             content_length = value.trim().parse::<usize>().ok();
         }
     }
@@ -896,10 +897,52 @@ async fn read_lsp_message(reader: &mut BufReader<ChildStdout>) -> Result<Option<
         return Err(anyhow!("missing Content-Length header"));
     };
 
+    if len > MAX_LSP_MESSAGE_BYTES {
+        return Err(anyhow!(
+            "LSP message too large: content-length={len} max={MAX_LSP_MESSAGE_BYTES}"
+        ));
+    }
+
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf).await?;
     let value: Value = serde_json::from_slice(&buf)?;
     Ok(Some(value))
+}
+
+fn should_omit_params_field(method: &str, params: &Value) -> bool {
+    params.is_null() && LSP_NO_PARAMS_METHODS.iter().any(|m| m == &method)
+}
+
+fn build_lsp_request(method: &str, id: i64, params: Value) -> Value {
+    if should_omit_params_field(method, &params) {
+        return serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+        });
+    }
+
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": params,
+    })
+}
+
+fn build_lsp_notification(method: &str, params: Value) -> Value {
+    if should_omit_params_field(method, &params) {
+        return serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+        });
+    }
+
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+    })
 }
 
 fn spawn_stderr_logger(stderr: ChildStderr) {
@@ -1031,6 +1074,25 @@ mod server_request_tests {
         assert_eq!(
             out,
             serde_json::json!([{ "tabSize": 2, "insertSpaces": false }])
+        );
+    }
+
+    #[test]
+    fn omit_params_for_shutdown_exit() {
+        assert_eq!(
+            build_lsp_request("shutdown", 1, Value::Null),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "shutdown",
+            })
+        );
+        assert_eq!(
+            build_lsp_notification("exit", Value::Null),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "exit",
+            })
         );
     }
 }
