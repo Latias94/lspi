@@ -41,7 +41,9 @@ If you prefer project-local installs (recommended for TS/Python), set `servers[]
 1) Install `lspi` (one-time):
 
 ```bash
-cargo install --path crates/lspi --locked
+cargo binstall lspi
+# or (build from source via crates.io):
+cargo install lspi --locked
 ```
 
 2) Create a per-project `lspi` config (recommended):
@@ -125,14 +127,6 @@ TypeScript/Vue tooling tends to be more quirky; `lspi` includes a small adapter 
 
 Yes. `lspi` does not bundle any language servers. Install the servers you need and point `lspi` at them via config.
 Use `lspi doctor --workspace-root .` to validate your setup.
-
-### How do I install common language servers?
-
-- Rust: `rustup component add rust-analyzer`
-- Go: `go install golang.org/x/tools/gopls@latest`
-- TypeScript: `npm i -g typescript typescript-language-server` (or install in the project and set `servers[].command`)
-- Python: `npm i -g pyright` (or install in the project and set `servers[].command`)
-- C#: install OmniSharp (`omnisharp`) and ensure `dotnet` is available
 
 ### Are Go / TypeScript supported?
 

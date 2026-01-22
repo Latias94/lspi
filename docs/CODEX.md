@@ -26,16 +26,24 @@ Notes:
 
 ## Recommended: Install `lspi` once
 
-From the `lspi` repo root:
+Install from releases (recommended):
 
 ```bash
-cargo install --path crates/lspi
+cargo binstall lspi
+# or (build from source via crates.io):
+cargo install lspi --locked
 ```
 
 Verify:
 
 ```bash
 lspi --version
+```
+
+If you are developing `lspi` from this repository:
+
+```bash
+cargo install --path crates/lspi --locked
 ```
 
 ## Configure Codex
