@@ -4875,8 +4875,7 @@ async fn apply_workspace_edit(
 
     for f in &mut files {
         if create_backups {
-            let backup_path =
-                PathBuf::from(format!("{}{}", f.path.to_string_lossy(), backup_suffix));
+            let backup_path = backup_path_for(&f.path, backup_suffix)?;
             tokio::fs::write(&backup_path, &f.original_bytes)
                 .await
                 .with_context(|| format!("failed to write backup file: {backup_path:?}"))?;
@@ -4913,6 +4912,27 @@ async fn apply_workspace_edit(
         files_modified,
         backup_files,
     })
+}
+
+fn backup_path_for(path: &Path, backup_suffix: &str) -> anyhow::Result<PathBuf> {
+    if backup_suffix.is_empty() {
+        return Err(anyhow::anyhow!("backup_suffix must not be empty"));
+    }
+    if backup_suffix.contains('/') || backup_suffix.contains('\\') {
+        return Err(anyhow::anyhow!(
+            "backup_suffix must not contain path separators"
+        ));
+    }
+    if backup_suffix.contains(':') {
+        return Err(anyhow::anyhow!("backup_suffix must not contain ':'"));
+    }
+
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("path has no file name: {path:?}"))?
+        .to_string_lossy();
+
+    Ok(path.with_file_name(format!("{file_name}{backup_suffix}")))
 }
 
 async fn write_best_effort_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -5220,6 +5240,11 @@ mod apply_workspace_edit_tests {
         Url::from_file_path(path).unwrap().to_string()
     }
 
+    fn expected_backup_path(path: &Path, suffix: &str) -> PathBuf {
+        let file_name = path.file_name().unwrap().to_string_lossy();
+        path.with_file_name(format!("{file_name}{suffix}"))
+    }
+
     #[tokio::test]
     async fn apply_workspace_edit_happy_path_creates_backup_and_writes_file() {
         let root_dir = tempdir().unwrap();
@@ -5308,7 +5333,7 @@ mod apply_workspace_edit_tests {
         let current_text = tokio::fs::read_to_string(&canonical).await.unwrap();
         assert_eq!(current_text, "hello\n");
 
-        let backup_path = PathBuf::from(format!("{}{}", canonical.to_string_lossy(), ".bak"));
+        let backup_path = expected_backup_path(&canonical, ".bak");
         assert!(!backup_path.exists());
     }
 
@@ -5346,7 +5371,7 @@ mod apply_workspace_edit_tests {
         let current_text = tokio::fs::read_to_string(&canonical).await.unwrap();
         assert_eq!(current_text, "hello\n");
 
-        let backup_path = PathBuf::from(format!("{}{}", canonical.to_string_lossy(), ".bak"));
+        let backup_path = expected_backup_path(&canonical, ".bak");
         assert!(!backup_path.exists());
     }
 
@@ -5382,6 +5407,44 @@ mod apply_workspace_edit_tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("outside workspace root"));
+    }
+
+    #[tokio::test]
+    async fn apply_workspace_edit_rejects_backup_suffix_with_path_separator() {
+        let root_dir = tempdir().unwrap();
+        let root = root_dir.path();
+
+        let file_path = root.join("a.rs");
+        tokio::fs::write(&file_path, "hello\n").await.unwrap();
+        let canonical = file_path.canonicalize().unwrap();
+
+        let edit = lspi_lsp::LspTextEdit {
+            range: lspi_lsp::LspRange {
+                start: lspi_lsp::LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+                end: lspi_lsp::LspPosition {
+                    line: 0,
+                    character: 5,
+                },
+            },
+            new_text: "world".to_string(),
+        };
+
+        let mut changes: HashMap<String, Vec<lspi_lsp::LspTextEdit>> = HashMap::new();
+        changes.insert(file_uri(&canonical), vec![edit]);
+
+        let err = apply_workspace_edit(root, &changes, None, true, "/../evil")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("backup_suffix"));
+
+        let current_text = tokio::fs::read_to_string(&canonical).await.unwrap();
+        assert_eq!(current_text, "hello\n");
+
+        let backup_path = expected_backup_path(&canonical, "/../evil");
+        assert!(!backup_path.exists());
     }
 }
 
