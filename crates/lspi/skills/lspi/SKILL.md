@@ -25,6 +25,7 @@ metadata:
 - All `*_at` tools use **1-based** `line` / `character`.
 - Prefer `*_at` tools when you have a cursor position: they apply bounded position fuzzing.
 - For multi-language workspaces: `search_workspace_symbols` MUST include `file_path` if multiple language servers are configured.
+- If `lspi` is started in read-only mode (`lspi mcp --read-only` or `mcp.read_only=true`), rename and server-control tools are disabled.
 - `rename_symbol` / `rename_symbol_strict` defaults to preview (`dry_run=true`). Only apply edits when explicitly requested.
 - After each tool call, briefly summarize what you did and what you got (method, key inputs like `file_path`/position, number of results, and whether output was truncated).
 - Most tools accept `max_results` and `max_total_chars`. For reproducible behavior, set them explicitly when needed.

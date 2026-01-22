@@ -2425,6 +2425,7 @@ mod search_workspace_symbols_tests {
             state: Arc::new(LspiState {
                 workspace_root: root,
                 allowed_roots,
+                read_only: false,
                 config: lspi_core::config::LspiConfig::default(),
                 servers,
                 rust_analyzer: Mutex::new(HashMap::new()),

@@ -35,6 +35,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 - Server config: `servers[].cwd` / `servers[].env` for setting the LSP process working directory and environment variables.
 - Server config: `servers[].adapter` for server-specific quirks (initially: `tsserver` for TypeScript/Vue tooling).
 - Server kind: `pyright` / `basedpyright` (auto-resolves commands, applies sensible default per-method timeouts).
+- MCP: read-only mode via `mcp.read_only=true` or `lspi mcp --read-only`.
 
 ## [0.1.0] - 2026-01-22
 

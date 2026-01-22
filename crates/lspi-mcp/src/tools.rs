@@ -88,3 +88,40 @@ pub(crate) fn filter_tools_by_config(
 
     filtered
 }
+
+pub(crate) fn filter_tools_read_only(tools: Vec<Tool>) -> Vec<Tool> {
+    let deny: std::collections::HashSet<&'static str> = [
+        "rename_symbol",
+        "rename_symbol_strict",
+        "restart_server",
+        "stop_server",
+    ]
+    .into_iter()
+    .collect();
+
+    tools
+        .into_iter()
+        .filter(|t| !deny.contains(t.name.as_ref()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_only_filter_removes_write_tools() {
+        let tools = all_tools();
+        let names: std::collections::HashSet<String> = filter_tools_read_only(tools)
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect();
+
+        assert!(!names.contains("rename_symbol"));
+        assert!(!names.contains("rename_symbol_strict"));
+        assert!(!names.contains("restart_server"));
+        assert!(!names.contains("stop_server"));
+        assert!(names.contains("find_definition_at"));
+        assert!(names.contains("get_diagnostics"));
+    }
+}

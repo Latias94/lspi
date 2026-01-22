@@ -50,6 +50,9 @@ enum Command {
         /// Start language servers eagerly (reduces first-tool-call latency)
         #[arg(long)]
         warmup: bool,
+        /// Expose a read-only toolset (disable rename and server-control tools)
+        #[arg(long)]
+        read_only: bool,
     },
     /// Print environment/config diagnostics for lspi
     Doctor {
@@ -128,11 +131,13 @@ async fn main() -> Result<()> {
             config,
             workspace_root,
             warmup,
+            read_only,
         } => {
             lspi_mcp::run_stdio_with_options(lspi_mcp::McpOptions {
                 config_path: config,
                 workspace_root,
                 warmup,
+                read_only,
             })
             .await
         }

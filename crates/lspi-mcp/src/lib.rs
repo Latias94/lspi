@@ -40,6 +40,7 @@ pub struct McpOptions {
     pub config_path: Option<PathBuf>,
     pub workspace_root: Option<PathBuf>,
     pub warmup: bool,
+    pub read_only: bool,
 }
 
 pub async fn run_stdio_with_options(options: McpOptions) -> Result<()> {
@@ -68,13 +69,27 @@ impl LspiMcpServer {
         let allowed_roots = compute_allowed_roots(&workspace_root, &servers);
 
         let all_tools = tools::all_tools();
+        let cfg_read_only = loaded
+            .config
+            .mcp
+            .as_ref()
+            .and_then(|m| m.read_only)
+            .unwrap_or(false);
+        let read_only = options.read_only || cfg_read_only;
+
         let tools = tools::filter_tools_by_config(all_tools, loaded.config.mcp.as_ref());
+        let tools = if read_only {
+            tools::filter_tools_read_only(tools)
+        } else {
+            tools
+        };
 
         let server = Self {
             tools: Arc::new(tools),
             state: Arc::new(LspiState {
                 workspace_root,
                 allowed_roots,
+                read_only,
                 config: loaded.config,
                 servers,
                 rust_analyzer: Mutex::new(HashMap::new()),
@@ -178,6 +193,27 @@ impl ServerHandler for LspiMcpServer {
         request: CallToolRequestParam,
         _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        if self.state.read_only
+            && matches!(
+                request.name.as_ref(),
+                "rename_symbol" | "rename_symbol_strict" | "restart_server" | "stop_server"
+            )
+        {
+            let tool = request.name.as_ref();
+            return Ok(CallToolResult {
+                content: vec![Content::text(format!(
+                    "Tool '{tool}' is disabled in read-only mode."
+                ))],
+                structured_content: Some(json!({
+                    "ok": false,
+                    "tool": tool,
+                    "message": "disabled in read-only mode",
+                })),
+                is_error: Some(true),
+                meta: None,
+            });
+        }
+
         match request.name.as_ref() {
             "find_definition" => self.find_definition(request).await,
             "find_definition_at" => self.find_definition_at(request).await,
@@ -233,6 +269,7 @@ impl<T> ManagedClient<T> {
 struct LspiState {
     workspace_root: PathBuf,
     allowed_roots: Vec<PathBuf>,
+    read_only: bool,
     config: lspi_core::config::LspiConfig,
     servers: Vec<lspi_core::config::ResolvedServerConfig>,
     rust_analyzer: Mutex<HashMap<String, ManagedClient<lspi_lsp::RustAnalyzerClient>>>,

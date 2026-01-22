@@ -100,6 +100,11 @@ pub struct LspServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct McpConfig {
+    /// If true, lspi exposes a read-only MCP toolset (navigation/diagnostics only).
+    /// This disables rename and server-control tools regardless of `mcp.tools.allow/exclude`.
+    #[serde(default)]
+    #[serde(alias = "readOnly")]
+    pub read_only: Option<bool>,
     #[serde(default)]
     pub output: Option<McpOutputConfig>,
     #[serde(default)]

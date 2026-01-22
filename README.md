@@ -59,6 +59,7 @@ Notes:
 - If your `lspi` config is not inside the workspace, pass it explicitly:
   - `args = ["mcp", "--workspace-root", ".", "--config", "/path/to/lspi.toml"]`
 - Optional: add `--warmup` to start language servers eagerly (reduces first-tool-call latency).
+- Optional: add `--read-only` (or set `mcp.read_only=true`) to expose a navigation-only toolset.
 
 For more details, see `docs/CODEX.md`.
 
@@ -191,6 +192,7 @@ Write / control:
 - `stop_server`
 
 If you want a least-privilege toolset (e.g. read-only navigation), use `mcp.tools` allow/exclude in your config.
+If you want a “hard” read-only mode (no rename/control tools even if allowed), use `mcp.read_only=true` or `lspi mcp --read-only`.
 
 ## Docs
 

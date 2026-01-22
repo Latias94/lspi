@@ -226,6 +226,18 @@ Semantics:
 - Tool names are matched case-insensitively.
 - `allow` (non-empty) takes precedence over `exclude`.
 
+### `mcp.read_only` (optional)
+
+Expose a read-only MCP toolset (navigation/diagnostics only). This disables:
+
+- `rename_symbol` / `rename_symbol_strict`
+- `restart_server` / `stop_server`
+
+```toml
+[mcp]
+read_only = true
+```
+
 ## CLI helper
 
 Generate a starter config:

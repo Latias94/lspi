@@ -21,6 +21,7 @@ This document provides copy-paste prompt snippets you can add to your project's 
   - All `*_at` tools use 1-based `line` / `character`.
   - Prefer `*_at` tools when you have a cursor/position (bounded position fuzzing).
   - If multiple language servers are configured, `search_workspace_symbols` should include `file_path` to disambiguate.
+  - If you want a least-privilege toolset, run `lspi mcp --read-only` (or set `mcp.read_only=true`) to disable rename and server-control tools.
   - For large result sets, set `max_results` / `max_total_chars` explicitly and consider `include_snippet=false`.
 - Tools:
   - `find_definition`, `find_definition_at`
@@ -50,10 +51,11 @@ You can paste the following into your project's `AGENTS.md`:
 - 用途：通过 `lspi`（MCP + LSP）提供符号级检索、引用分析与安全重命名，帮助在大型代码库中高效定位、理解并修改代码。
 - 触发：需要按符号/语义查找、跨文件引用分析、重构迁移、诊断检查、在指定符号处进行安全改动等场景。
 - 流程：确认目标文件/位置 → definition/references 验证上下文 → rename 先预览(dry_run=true) → 必要时再 apply(dry_run=false) → 汇总变更与原因。
-- 关键规则：
+  - 关键规则：
   - 所有 `*_at` 工具使用 1-based 的 `line`/`character`。
   - 有光标/位置时优先用 `*_at`（内部有有限度的位置模糊，鲁棒性更好）。
   - 若配置了多个语言服务器，`search_workspace_symbols` 需要提供 `file_path` 用于选择正确的 server。
+  - 若需要最小权限（只读导航），可以启用只读模式：`lspi mcp --read-only` 或 `mcp.read_only=true`（会禁用 rename 与 server control 工具）。
   - 对结果数量可能很大的工具（尤其 references），请显式设置 `max_results` / `max_total_chars`，必要时关闭代码片段 `include_snippet=false`。
   - 每次工具调用后，输出一个极简“工具调用小结”（调用的工具名/关键入参/结果条数/是否截断），方便追溯。
 - 常用工具：
