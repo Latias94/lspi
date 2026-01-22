@@ -63,6 +63,8 @@ Notes:
 - If you keep `lspi` config outside the workspace, pass it explicitly:
   - `args = ["mcp", "--workspace-root", ".", "--config", "/path/to/lspi.toml"]`
 
+For a deeper explanation of `structuredContent`, `next_steps`, truncation/caps, and debugging workflow, see `docs/MCP.md`.
+
 ## Recommended: Add agent instructions (two options)
 
 ### Option A: Add an `AGENTS.md` snippet (works for any agent)

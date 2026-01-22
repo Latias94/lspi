@@ -26,6 +26,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 - Build: relax dependency version specifiers and upgrade `rmcp` to `0.13`.
 - Repo hygiene: ignore IntelliJ project files (`.idea/`, `*.iml`).
 - Docs: improve MCP-first documentation (README FAQ/troubleshooting, minimal config example, and upstream inspirations).
+- Docs: add `docs/MCP.md` describing structured tool results, `next_steps`, and debugging workflow.
 - MCP: when multiple servers are configured, `search_workspace_symbols` returns a disambiguation payload (instead of a hard error) so clients can pick a server by providing `file_path`.
 - MCP: standardize `structuredContent` tool responses with a versioned `schema_version` field and consistent common fields (`input`/`warnings`/`truncated`).
 - TS/Vue adapter: apply sensible default per-method request timeouts for slow operations (overridable via `servers[].request_timeout_overrides_ms`).

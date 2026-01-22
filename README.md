@@ -209,6 +209,7 @@ If you want a “hard” read-only mode (no rename/control tools even if allowed
 
 - Codex integration: `docs/CODEX.md`
 - Configuration: `docs/CONFIG.md`
+- MCP behavior (structuredContent / next_steps / debugging): `docs/MCP.md`
 - Agent prompt snippet (copy-paste): `docs/AGENTS_SNIPPETS.md`
 - Smoke tests: `docs/SMOKE_TEST.md`
 - Release notes: `CHANGELOG.md`
