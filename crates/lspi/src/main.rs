@@ -24,6 +24,11 @@ fn is_generic_kind(kind: &str) -> bool {
     normalized == "generic" || normalized == "lsp"
 }
 
+fn is_pyright_kind(kind: &str) -> bool {
+    let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
+    normalized == "pyright" || normalized == "basedpyright"
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "lspi")]
 #[command(version)]
@@ -222,6 +227,52 @@ async fn main() -> Result<()> {
                             eprintln!(
                                 "doctor_hint: `dotnet` was not found. Install .NET SDK and retry."
                             );
+                        }
+
+                        continue;
+                    }
+
+                    if is_pyright_kind(&s.kind) {
+                        let normalized_kind = s.kind.trim().to_ascii_lowercase().replace('-', "_");
+                        let command = match s.command.as_deref() {
+                            Some(c) if !c.trim().is_empty() => c.to_string(),
+                            _ if normalized_kind == "basedpyright" => {
+                                lspi_lsp::resolve_basedpyright_command().await?
+                            }
+                            _ => lspi_lsp::resolve_pyright_command().await?,
+                        };
+
+                        println!(
+                            "server_preflight: id={} kind={} command={}",
+                            s.id, s.kind, command
+                        );
+
+                        if let Err(err) = lspi_lsp::preflight_pyright(&command).await {
+                            eprintln!("doctor_error: id={} kind={} error={:#}", s.id, s.kind, err);
+                            eprintln!(
+                                "doctor_hint: Install Pyright (e.g. `npm i -g pyright`) and ensure `pyright-langserver` is on PATH."
+                            );
+                            eprintln!(
+                                "doctor_hint: Or set LSPI_PYRIGHT_COMMAND / LSPI_BASEDPYRIGHT_COMMAND, or servers[].command explicitly."
+                            );
+                            failures
+                                .push(format!("pyright preflight failed for server id={}", s.id));
+                            continue;
+                        }
+
+                        let output = TokioCommand::new(&command).arg("--version").output().await;
+                        if let Ok(output) = output {
+                            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                            if !stdout.is_empty() {
+                                println!("server_version: id={} {stdout}", s.id);
+                            } else if !stderr.is_empty() {
+                                println!("server_version: id={} {stderr}", s.id);
+                            } else {
+                                println!("server_version: id={} <unknown>", s.id);
+                            }
+                        } else {
+                            println!("server_version: id={} <unknown>", s.id);
                         }
 
                         continue;

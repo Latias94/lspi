@@ -21,6 +21,7 @@ This document provides copy-paste prompt snippets you can add to your project's 
   - All `*_at` tools use 1-based `line` / `character`.
   - Prefer `*_at` tools when you have a cursor/position (bounded position fuzzing).
   - If multiple language servers are configured, `search_workspace_symbols` should include `file_path` to disambiguate.
+  - For large result sets, set `max_results` / `max_total_chars` explicitly and consider `include_snippet=false`.
 - Tools:
   - `find_definition`, `find_definition_at`
   - `find_references`, `find_references_at`
@@ -53,6 +54,7 @@ You can paste the following into your project's `AGENTS.md`:
   - 所有 `*_at` 工具使用 1-based 的 `line`/`character`。
   - 有光标/位置时优先用 `*_at`（内部有有限度的位置模糊，鲁棒性更好）。
   - 若配置了多个语言服务器，`search_workspace_symbols` 需要提供 `file_path` 用于选择正确的 server。
+  - 对结果数量可能很大的工具（尤其 references），请显式设置 `max_results` / `max_total_chars`，必要时关闭代码片段 `include_snippet=false`。
 - 常用工具：
   - find_definition / find_definition_at
   - find_references / find_references_at

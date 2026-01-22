@@ -15,10 +15,13 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 
 - MCP tool schemas: add clearer descriptions and default/maximum hints for common parameters (`max_results`, snippet controls).
 - LSP client: reply to common server-initiated requests (`workspace/configuration`, `workspace/workspaceFolders`, etc.) to improve generic LSP compatibility.
+- `lspi doctor`: add Pyright preflight hints (`kind=pyright|basedpyright`).
 
 ### Added
 
 - Server config: `servers[].workspace_configuration` for customizing responses to `workspace/configuration` requests (useful for TypeScript formatting options, etc.).
+- Server config: `servers[].request_timeout_overrides_ms` for per-method request timeouts (useful for slow workspace-wide operations).
+- Server kind: `pyright` / `basedpyright` (auto-resolves commands, applies sensible default per-method timeouts).
 
 ## [0.1.0] - 2026-01-22
 

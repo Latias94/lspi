@@ -23,7 +23,7 @@ pub struct LspServerConfig {
     /// Optional stable identifier for logs and future UX.
     #[serde(default)]
     pub id: Option<String>,
-    /// Server kind (currently only `rust_analyzer` is supported).
+    /// Server kind (supported: `rust_analyzer`, `omnisharp`, `generic`, `pyright`, `basedpyright`).
     #[serde(default)]
     pub kind: Option<String>,
     /// Command to start the server.
@@ -48,6 +48,11 @@ pub struct LspServerConfig {
     pub initialize_timeout_ms: Option<u64>,
     #[serde(default)]
     pub request_timeout_ms: Option<u64>,
+    /// Optional per-method request timeouts (milliseconds).
+    /// Keys are full LSP method names, e.g. `textDocument/references`.
+    #[serde(default)]
+    #[serde(alias = "requestTimeoutOverridesMs")]
+    pub request_timeout_overrides_ms: Option<HashMap<String, u64>>,
     #[serde(default)]
     pub warmup_timeout_ms: Option<u64>,
     /// Optional interval (minutes) to auto-restart long-running servers (helps stability for some LSPs).
@@ -118,6 +123,7 @@ pub struct ResolvedServerConfig {
     pub root_dir: PathBuf,
     pub initialize_timeout_ms: Option<u64>,
     pub request_timeout_ms: Option<u64>,
+    pub request_timeout_overrides_ms: HashMap<String, u64>,
     pub warmup_timeout_ms: Option<u64>,
     pub restart_interval_minutes: Option<u64>,
     pub idle_shutdown_ms: Option<u64>,
@@ -323,6 +329,20 @@ fn resolve_server_config(
         root_dir,
         initialize_timeout_ms: server.initialize_timeout_ms,
         request_timeout_ms: server.request_timeout_ms,
+        request_timeout_overrides_ms: server
+            .request_timeout_overrides_ms
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let key = k.trim().to_string();
+                if key.is_empty() || v == 0 {
+                    None
+                } else {
+                    Some((key, v))
+                }
+            })
+            .collect(),
         warmup_timeout_ms: server.warmup_timeout_ms,
         restart_interval_minutes: server.restart_interval_minutes,
         idle_shutdown_ms: server.idle_shutdown_ms,
@@ -350,6 +370,7 @@ fn default_rust_analyzer_server(workspace_root: &Path) -> ResolvedServerConfig {
         root_dir: workspace_root.to_path_buf(),
         initialize_timeout_ms: None,
         request_timeout_ms: None,
+        request_timeout_overrides_ms: HashMap::new(),
         warmup_timeout_ms: None,
         restart_interval_minutes: None,
         idle_shutdown_ms: None,
@@ -521,6 +542,29 @@ formattingOptions = { tabSize = 2, insertSpaces = true }
     }
 
     #[test]
+    fn toml_parses_request_timeout_overrides_ms() {
+        let toml = r#"
+[[servers]]
+id = "py"
+kind = "generic"
+extensions = ["py"]
+command = "pyright-langserver"
+args = ["--stdio"]
+language_id = "python"
+
+[servers.request_timeout_overrides_ms]
+"textDocument/references" = 120000
+"textDocument/rename" = 120000
+"textDocument/definition" = 5000
+"#;
+        let config: LspiConfig = toml::from_str(toml).unwrap();
+        let server = config.servers.unwrap().into_iter().next().unwrap();
+        let map = server.request_timeout_overrides_ms.unwrap();
+        assert_eq!(map.get("textDocument/references").copied(), Some(120000));
+        assert_eq!(map.get("textDocument/definition").copied(), Some(5000));
+    }
+
+    #[test]
     fn route_server_by_path_prefers_longest_root_dir_match() {
         let root = temp_root("route-longest");
         let nested = root.join("nested");
@@ -537,6 +581,7 @@ formattingOptions = { tabSize = 2, insertSpaces = true }
                 root_dir: root.clone(),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
+                request_timeout_overrides_ms: HashMap::new(),
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
@@ -552,6 +597,7 @@ formattingOptions = { tabSize = 2, insertSpaces = true }
                 root_dir: nested.clone(),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
+                request_timeout_overrides_ms: HashMap::new(),
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
@@ -584,6 +630,7 @@ formattingOptions = { tabSize = 2, insertSpaces = true }
                 root_dir: root.join("does-not-contain"),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
+                request_timeout_overrides_ms: HashMap::new(),
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
@@ -599,6 +646,7 @@ formattingOptions = { tabSize = 2, insertSpaces = true }
                 root_dir: root.join("also-does-not-contain"),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
+                request_timeout_overrides_ms: HashMap::new(),
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,

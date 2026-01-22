@@ -1,6 +1,7 @@
 mod generic;
 mod lsp;
 mod omnisharp;
+mod pyright;
 mod rust_analyzer;
 mod symbol;
 
@@ -10,6 +11,7 @@ pub use generic::{GenericLspClient, GenericLspClientOptions};
 pub use omnisharp::{
     OmniSharpClient, OmniSharpClientOptions, preflight_omnisharp, resolve_omnisharp_command,
 };
+pub use pyright::{preflight_pyright, resolve_basedpyright_command, resolve_pyright_command};
 pub use symbol::parse_symbol_kind;
 pub use symbol::{
     CallHierarchyIncomingResult, CallHierarchyItemResolved, CallHierarchyOutgoingResult,

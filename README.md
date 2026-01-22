@@ -82,6 +82,8 @@ Common environment variables:
 - `LSPI_CONFIG_PATH`: explicit config file path
 - `LSPI_RUST_ANALYZER_COMMAND`: override `rust-analyzer` command
 - `LSPI_OMNISHARP_COMMAND`: override `omnisharp` command
+- `LSPI_PYRIGHT_COMMAND`: override `pyright-langserver` command
+- `LSPI_BASEDPYRIGHT_COMMAND`: override `basedpyright-langserver` command
 
 ## Optional: add agent instructions / skill metadata
 

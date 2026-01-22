@@ -27,6 +27,7 @@ pub struct GenericLspClientOptions {
     pub cwd: PathBuf,
     pub initialize_timeout: Duration,
     pub request_timeout: Duration,
+    pub request_timeout_overrides: HashMap<String, Duration>,
     pub language_id: String,
     pub warmup_delay: Duration,
     pub workspace_configuration: HashMap<String, Value>,
@@ -60,6 +61,7 @@ impl GenericLspClient {
             cwd: options.cwd,
             initialize_timeout: options.initialize_timeout,
             request_timeout: options.request_timeout,
+            request_timeout_overrides: options.request_timeout_overrides,
             workspace_configuration: options.workspace_configuration,
         })
         .await?;

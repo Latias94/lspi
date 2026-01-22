@@ -226,7 +226,7 @@ impl LspiMcpServer {
                         continue;
                     }
 
-                    if is_generic_kind(kind) {
+                    if is_generic_kind(kind) || is_pyright_kind(kind) {
                         let removed = {
                             let mut guard = state.generic.lock().await;
                             if let Some(entry) = guard.get(id) {
@@ -1191,6 +1191,14 @@ impl LspiMcpServer {
             });
         }
 
+        if is_pyright_kind(&server.kind) {
+            let client = self.pyright_for_server(server).await?;
+            return Ok(RoutedClient::Generic {
+                server_id: server.id.clone(),
+                client,
+            });
+        }
+
         if is_generic_kind(&server.kind) {
             let client = self.generic_for_server(server).await?;
             return Ok(RoutedClient::Generic {
@@ -1261,6 +1269,8 @@ impl LspiMcpServer {
             .request_timeout_ms
             .map(std::time::Duration::from_millis)
             .unwrap_or_else(|| std::time::Duration::from_secs(30));
+        let request_timeout_overrides =
+            request_timeout_overrides_to_durations(&server.request_timeout_overrides_ms);
         let warmup_timeout = server
             .warmup_timeout_ms
             .map(std::time::Duration::from_millis)
@@ -1272,6 +1282,7 @@ impl LspiMcpServer {
             cwd: server.root_dir.clone(),
             initialize_timeout,
             request_timeout,
+            request_timeout_overrides,
             warmup_timeout,
             workspace_configuration: server.workspace_configuration.clone(),
         })
@@ -1351,6 +1362,8 @@ impl LspiMcpServer {
             .request_timeout_ms
             .map(std::time::Duration::from_millis)
             .unwrap_or_else(|| std::time::Duration::from_secs(30));
+        let request_timeout_overrides =
+            request_timeout_overrides_to_durations(&server.request_timeout_overrides_ms);
 
         // OmniSharp does not implement rust-analyzer's serverStatus notifications, so a
         // long per-request warmup wait would be counterproductive. Use a small optional delay
@@ -1372,6 +1385,7 @@ impl LspiMcpServer {
             cwd: server.root_dir.clone(),
             initialize_timeout,
             request_timeout,
+            request_timeout_overrides,
             warmup_delay,
             workspace_configuration: server.workspace_configuration.clone(),
         })
@@ -1454,6 +1468,8 @@ impl LspiMcpServer {
             .request_timeout_ms
             .map(std::time::Duration::from_millis)
             .unwrap_or_else(|| std::time::Duration::from_secs(30));
+        let request_timeout_overrides =
+            request_timeout_overrides_to_durations(&server.request_timeout_overrides_ms);
         let warmup_delay = server
             .warmup_timeout_ms
             .map(std::time::Duration::from_millis)
@@ -1471,6 +1487,124 @@ impl LspiMcpServer {
             cwd: server.root_dir.clone(),
             initialize_timeout,
             request_timeout,
+            request_timeout_overrides,
+            language_id,
+            warmup_delay,
+            workspace_configuration: server.workspace_configuration.clone(),
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let arc = Arc::new(client);
+        let managed = ManagedClient::new(arc.clone());
+
+        let inserted = {
+            let mut guard = self.state.generic.lock().await;
+            if let Some(existing) = guard.get_mut(&server.id) {
+                existing.last_used = now;
+                Some(existing.client.clone())
+            } else {
+                guard.insert(server.id.clone(), managed);
+                None
+            }
+        };
+
+        if let Some(existing) = inserted {
+            let _ = shutdown_generic_arc(arc).await;
+            return Ok(existing);
+        }
+
+        Ok(arc)
+    }
+
+    async fn pyright_for_server(
+        &self,
+        server: &lspi_core::config::ResolvedServerConfig,
+    ) -> Result<Arc<lspi_lsp::GenericLspClient>, McpError> {
+        let now = Instant::now();
+
+        let restart_old = {
+            let mut guard = self.state.generic.lock().await;
+            if let Some(entry) = guard.get_mut(&server.id) {
+                if should_restart(now, entry.started_at, server.restart_interval_minutes) {
+                    guard.remove(&server.id)
+                } else {
+                    entry.last_used = now;
+                    return Ok(entry.client.clone());
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(old) = restart_old {
+            match shutdown_generic_managed(old).await {
+                Ok(()) => {}
+                Err(mut old) => {
+                    old.last_used = now;
+                    let client = old.client.clone();
+                    let mut guard = self.state.generic.lock().await;
+                    guard.insert(server.id.clone(), old);
+                    return Ok(client);
+                }
+            }
+        }
+
+        let normalized_kind = server.kind.trim().to_ascii_lowercase().replace('-', "_");
+        let command = match server.command.as_deref().filter(|c| !c.trim().is_empty()) {
+            Some(c) => c.to_string(),
+            None if normalized_kind == "basedpyright" => lspi_lsp::resolve_basedpyright_command()
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+            None => lspi_lsp::resolve_pyright_command()
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+        };
+
+        if let Err(err) = lspi_lsp::preflight_pyright(&command).await {
+            return Err(McpError::invalid_params(
+                format!("pyright preflight failed for command={command}: {err:#}"),
+                None,
+            ));
+        }
+
+        let args = if server.args.is_empty() {
+            vec!["--stdio".to_string()]
+        } else {
+            server.args.clone()
+        };
+
+        let initialize_timeout = server
+            .initialize_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(|| std::time::Duration::from_secs(20));
+        let request_timeout = server
+            .request_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(|| std::time::Duration::from_secs(30));
+
+        let mut overrides_ms = pyright_default_request_timeout_overrides_ms();
+        overrides_ms.extend(server.request_timeout_overrides_ms.clone());
+        let request_timeout_overrides = request_timeout_overrides_to_durations(&overrides_ms);
+
+        let warmup_delay = server
+            .warmup_timeout_ms
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_else(|| std::time::Duration::from_millis(0));
+
+        let language_id = server
+            .language_id
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "python".to_string());
+
+        let client = lspi_lsp::GenericLspClient::start(lspi_lsp::GenericLspClientOptions {
+            command,
+            args,
+            cwd: server.root_dir.clone(),
+            initialize_timeout,
+            request_timeout,
+            request_timeout_overrides,
             language_id,
             warmup_delay,
             workspace_configuration: server.workspace_configuration.clone(),
@@ -4273,7 +4407,7 @@ impl LspiMcpServer {
                 continue;
             }
 
-            if is_generic_kind(&kind) {
+            if is_generic_kind(&kind) || is_pyright_kind(&kind) {
                 let entry = {
                     let mut guard = self.state.generic.lock().await;
                     guard.remove(&id)
@@ -4447,7 +4581,7 @@ impl LspiMcpServer {
                 continue;
             }
 
-            if is_generic_kind(&kind) {
+            if is_generic_kind(&kind) || is_pyright_kind(&kind) {
                 let entry = {
                     let mut guard = self.state.generic.lock().await;
                     guard.remove(&id)
@@ -4523,6 +4657,11 @@ fn is_generic_kind(kind: &str) -> bool {
     normalized == "generic" || normalized == "lsp"
 }
 
+fn is_pyright_kind(kind: &str) -> bool {
+    let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
+    normalized == "pyright" || normalized == "basedpyright"
+}
+
 fn guess_language_id_from_extensions(extensions: &[String]) -> String {
     let Some(first) = extensions.first() else {
         return "plaintext".to_string();
@@ -4549,6 +4688,33 @@ fn guess_language_id_from_extensions(extensions: &[String]) -> String {
         _ => "plaintext",
     }
     .to_string()
+}
+
+fn pyright_default_request_timeout_overrides_ms() -> std::collections::HashMap<String, u64> {
+    [
+        ("textDocument/definition", 45_000),
+        ("textDocument/references", 60_000),
+        ("textDocument/rename", 60_000),
+        ("textDocument/documentSymbol", 45_000),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect()
+}
+
+fn request_timeout_overrides_to_durations(
+    overrides_ms: &std::collections::HashMap<String, u64>,
+) -> std::collections::HashMap<String, std::time::Duration> {
+    overrides_ms
+        .iter()
+        .filter_map(|(k, v)| {
+            let key = k.trim();
+            if key.is_empty() || *v == 0 {
+                return None;
+            }
+            Some((key.to_string(), std::time::Duration::from_millis(*v)))
+        })
+        .collect()
 }
 
 fn should_restart(

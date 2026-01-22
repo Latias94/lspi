@@ -114,6 +114,7 @@ Copy-Item -Recurse -Force "C:\\path\\to\\lspi\\.codex\\skills\\lspi" "C:\\path\\
 
 - All `*_at` tools use **1-based** `line` / `character`.
 - Prefer `*_at` tools when you have a cursor/position: they apply bounded position fuzzing for robustness.
+- For large result sets (especially references), set `max_results` / `max_total_chars` explicitly and consider `include_snippet=false`.
 - `search_workspace_symbols`:
   - If multiple language servers are configured, provide `file_path` to disambiguate which server to use.
   - If only one server is configured, `file_path` is optional.

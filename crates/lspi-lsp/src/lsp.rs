@@ -190,6 +190,7 @@ pub struct LspClientOptions {
     pub cwd: PathBuf,
     pub initialize_timeout: Duration,
     pub request_timeout: Duration,
+    pub request_timeout_overrides: HashMap<String, Duration>,
     pub workspace_configuration: HashMap<String, Value>,
 }
 
@@ -212,6 +213,7 @@ pub struct LspClient {
     root_uri: String,
     diagnostic_pull_supported: AtomicU8, // 0=unknown, 1=yes, 2=no
     default_request_timeout: Duration,
+    request_timeout_overrides: Arc<HashMap<String, Duration>>,
     workspace_configuration: Arc<HashMap<String, Value>>,
 }
 
@@ -260,6 +262,7 @@ impl LspClient {
                 .to_string(),
             diagnostic_pull_supported: AtomicU8::new(0),
             default_request_timeout: options.request_timeout,
+            request_timeout_overrides: Arc::new(options.request_timeout_overrides),
             workspace_configuration: Arc::new(options.workspace_configuration),
         };
 
@@ -511,7 +514,12 @@ impl LspClient {
             return Err(err);
         }
 
-        let wait = request_timeout.unwrap_or(self.default_request_timeout);
+        let wait = request_timeout.unwrap_or_else(|| {
+            self.request_timeout_overrides
+                .get(method)
+                .cloned()
+                .unwrap_or(self.default_request_timeout)
+        });
         let response_value = match timeout(wait, rx).await {
             Ok(v) => v,
             Err(_) => {

@@ -27,6 +27,7 @@ metadata:
 - For multi-language workspaces: `search_workspace_symbols` MUST include `file_path` if multiple language servers are configured.
 - `rename_symbol` / `rename_symbol_strict` defaults to preview (`dry_run=true`). Only apply edits when explicitly requested.
 - Most tools accept `max_results` and `max_total_chars`. For reproducible behavior, set them explicitly when needed.
+- For large result sets, consider disabling snippets (`include_snippet=false`) to keep outputs small and deterministic.
 
 ## Recommended workflow (read → verify → change)
 

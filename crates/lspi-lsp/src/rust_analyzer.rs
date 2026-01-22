@@ -29,6 +29,7 @@ pub struct RustAnalyzerClientOptions {
     pub cwd: PathBuf,
     pub initialize_timeout: Duration,
     pub request_timeout: Duration,
+    pub request_timeout_overrides: HashMap<String, Duration>,
     pub warmup_timeout: Duration,
     pub workspace_configuration: HashMap<String, Value>,
 }
@@ -93,6 +94,7 @@ impl Default for RustAnalyzerClientOptions {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             initialize_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
+            request_timeout_overrides: HashMap::new(),
             warmup_timeout: Duration::from_secs(5),
             workspace_configuration: HashMap::new(),
         }
@@ -120,6 +122,7 @@ impl RustAnalyzerClient {
             cwd: options.cwd,
             initialize_timeout: options.initialize_timeout,
             request_timeout: options.request_timeout,
+            request_timeout_overrides: options.request_timeout_overrides,
             workspace_configuration: options.workspace_configuration,
         })
         .await?;

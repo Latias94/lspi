@@ -23,7 +23,7 @@ Overrides the workspace root used for safety checks and path resolution.
 ```toml
 [[servers]]
 id = "rust-analyzer"               # optional but recommended
-kind = "rust_analyzer"             # required (supported: rust_analyzer, omnisharp, generic)
+kind = "rust_analyzer"             # required (supported: rust_analyzer, omnisharp, generic, pyright, basedpyright)
 extensions = ["rs"]                # required (no leading dots)
 # root_dir = "."                   # optional; absolute or relative to workspace_root
 # command = "rust-analyzer"        # optional; defaults to auto-resolve
@@ -31,6 +31,11 @@ extensions = ["rs"]                # required (no leading dots)
 # language_id = "rust"             # optional; used by kind="generic" (best-effort default from extension)
 initialize_timeout_ms = 10000      # optional
 request_timeout_ms = 30000         # optional
+# Optional: per-method request timeouts (milliseconds). Useful for servers where some
+# workspace-wide operations need longer than the global request_timeout_ms.
+# [servers.request_timeout_overrides_ms]
+# "textDocument/references" = 120000
+# "textDocument/rename" = 120000
 warmup_timeout_ms = 5000           # optional
 # restart_interval_minutes = 30    # optional; auto-restart long-running servers
 # idle_shutdown_ms = 300000        # optional; auto-stop after being idle
@@ -112,19 +117,31 @@ initialize_timeout_ms = 20000
 request_timeout_ms = 30000
 ```
 
-### Generic LSP example (Python / pyright-langserver)
+### Python example (Pyright / pyright-langserver)
 
 ```toml
 [[servers]]
 id = "python"
-kind = "generic"
+kind = "pyright"
 extensions = ["py"]
 language_id = "python"
-command = "pyright-langserver"
-args = ["--stdio"]
+# command = "pyright-langserver"   # optional; defaults to pyright-langserver (or basedpyright-langserver)
+# args = ["--stdio"]              # optional; defaults to ["--stdio"]
 initialize_timeout_ms = 20000
 request_timeout_ms = 30000
+
+# Optional: Pyright can take longer for workspace-wide operations in large repos.
+# [servers.request_timeout_overrides_ms]
+# "textDocument/references" = 120000
+# "textDocument/rename" = 120000
 ```
+
+Notes:
+
+- For BasedPyright, set `kind = "basedpyright"` (same schema; different default command).
+- If `command` is not set for a `pyright` / `basedpyright` server, `lspi` tries:
+  - `LSPI_PYRIGHT_COMMAND` / `LSPI_BASEDPYRIGHT_COMMAND`
+  - `pyright-langserver` / `basedpyright-langserver` from `PATH`
 
 ### Generic LSP example (Lua / lua-language-server)
 
