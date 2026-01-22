@@ -33,6 +33,132 @@ mod workspace_edit;
 use output::{effective_max_total_chars, enforce_global_output_caps};
 use structured::{structured_error, structured_ok};
 
+fn mcp_error_kind_name(code: i32) -> &'static str {
+    match code {
+        -32002 => "resource_not_found",
+        -32600 => "invalid_request",
+        -32601 => "method_not_found",
+        -32602 => "invalid_params",
+        -32603 => "internal_error",
+        -32700 => "parse_error",
+        _ => "mcp_error",
+    }
+}
+
+fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
+    let mut steps = Vec::new();
+
+    // Always include a minimal introspection path, unless the failing tool is itself introspection.
+    if !matches!(
+        tool,
+        "get_current_config" | "list_servers" | "get_server_status"
+    ) {
+        steps.push(json!({
+            "kind": "tool",
+            "tool": "get_current_config",
+            "arguments": {},
+            "message": "Confirm the effective MCP config (workspace_root, allowed_roots, read_only, output caps)."
+        }));
+        steps.push(json!({
+            "kind": "tool",
+            "tool": "list_servers",
+            "arguments": {},
+            "message": "Confirm configured servers, extensions, and routing metadata."
+        }));
+        steps.push(json!({
+            "kind": "tool",
+            "tool": "get_server_status",
+            "arguments": {},
+            "message": "Confirm server lifecycle status (running, last error, warmup)."
+        }));
+    }
+
+    if message.contains("no configured LSP server matches file extension") {
+        steps.push(json!({
+            "kind": "config",
+            "message": "Add/verify `servers[].extensions` for this language, or pass a `file_path` with the expected extension so routing can pick the correct server."
+        }));
+    }
+
+    if message.contains("missing command for generic server id=") {
+        steps.push(json!({
+            "kind": "config",
+            "message": "Set `servers[].command` (and usually `args=[\"--stdio\"]`) for `kind=\"generic\"`, or switch to a first-class kind if available."
+        }));
+        steps.push(json!({
+            "kind": "command",
+            "command": "lspi doctor --workspace-root .",
+            "message": "Run doctor to verify language server installation and provide install hints."
+        }));
+    }
+
+    if message.contains("pyright preflight failed") {
+        steps.push(json!({
+            "kind": "command",
+            "command": "lspi doctor --workspace-root .",
+            "message": "Run doctor to validate Pyright/basedpyright availability and see install hints."
+        }));
+        steps.push(json!({
+            "kind": "config",
+            "message": "If you have multiple Python tooling installs, set `servers[].command` explicitly (or `LSPI_PYRIGHT_COMMAND` / `LSPI_BASEDPYRIGHT_COMMAND`)."
+        }));
+    }
+
+    if message.contains("outside allowed roots")
+        || message.contains("refusing to write outside allowed roots")
+    {
+        steps.push(json!({
+            "kind": "config",
+            "message": "Ensure `file_path` is under the configured `workspace_root` or `servers[].workspace_folders` (multi-root). If you run Codex, also ensure you start it from the intended project root."
+        }));
+    }
+
+    if message.to_ascii_lowercase().contains("timed out") {
+        steps.push(json!({
+            "kind": "config",
+            "message": "Increase `servers[].request_timeout_ms` or set `servers[].request_timeout_overrides_ms` for slow methods (definition/references/rename/documentSymbol)."
+        }));
+    }
+
+    steps
+}
+
+fn mcp_error_to_call_tool_result(
+    tool: &str,
+    input: Option<Value>,
+    err: McpError,
+) -> CallToolResult {
+    let code = err.code.0;
+    let kind = mcp_error_kind_name(code);
+    let message = err.message.to_string();
+
+    let mut structured = structured_error(tool, None, input, kind, &message);
+    if let Some(obj) = structured.as_object_mut() {
+        obj.insert("message".to_string(), Value::String(message.clone()));
+        obj.insert("mcp_error_code".to_string(), json!(code));
+
+        if let Some(error_obj) = obj.get_mut("error").and_then(|v| v.as_object_mut()) {
+            error_obj.insert("code".to_string(), json!(code));
+            if let Some(data) = err.data {
+                error_obj.insert("data".to_string(), data);
+            }
+        }
+
+        let next_steps = error_next_steps(tool, &message);
+        if !next_steps.is_empty() {
+            obj.insert("next_steps".to_string(), Value::Array(next_steps));
+        }
+    }
+
+    CallToolResult {
+        // Keep a short text fallback for clients that ignore structuredContent.
+        content: vec![Content::text(message)],
+        structured_content: Some(structured),
+        is_error: Some(true),
+        meta: None,
+    }
+}
+
 pub async fn run_stdio() -> Result<()> {
     run_stdio_with_options(McpOptions::default()).await
 }
@@ -272,6 +398,73 @@ mod mcp_context_tests {
     }
 }
 
+#[cfg(test)]
+mod mcp_error_mapping_tests {
+    use super::*;
+
+    fn structured_next_steps(result: &CallToolResult) -> Vec<Value> {
+        let Some(sc) = result.structured_content.as_ref() else {
+            return Vec::new();
+        };
+        let Some(obj) = sc.as_object() else {
+            return Vec::new();
+        };
+        obj.get("next_steps")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn has_next_step_tool(steps: &[Value], tool: &str) -> bool {
+        steps.iter().any(|v| {
+            v.as_object()
+                .and_then(|o| o.get("tool"))
+                .and_then(|t| t.as_str())
+                == Some(tool)
+        })
+    }
+
+    #[test]
+    fn routing_extension_error_includes_introspection_next_steps() {
+        let err =
+            McpError::invalid_params("no configured LSP server matches file extension: rs", None);
+        let result = mcp_error_to_call_tool_result("find_definition", None, err);
+        assert_eq!(result.is_error, Some(true));
+        let steps = structured_next_steps(&result);
+        assert!(has_next_step_tool(&steps, "list_servers"));
+        assert!(has_next_step_tool(&steps, "get_current_config"));
+    }
+
+    #[test]
+    fn missing_generic_command_includes_doctor_hint() {
+        let err = McpError::invalid_params("missing command for generic server id=ts", None);
+        let result = mcp_error_to_call_tool_result("hover_at", None, err);
+        let steps = structured_next_steps(&result);
+        assert!(steps.iter().any(|v| {
+            v.as_object()
+                .and_then(|o| o.get("command"))
+                .and_then(|c| c.as_str())
+                == Some("lspi doctor --workspace-root .")
+        }));
+    }
+
+    #[test]
+    fn outside_allowed_roots_includes_config_hint() {
+        let err = McpError::invalid_params(
+            "file_path is outside allowed roots (workspace_root=\"X\", file_path=\"Y\")",
+            None,
+        );
+        let result = mcp_error_to_call_tool_result("rename_symbol", None, err);
+        let steps = structured_next_steps(&result);
+        assert!(steps.iter().any(|v| {
+            v.as_object()
+                .and_then(|o| o.get("kind"))
+                .and_then(|k| k.as_str())
+                == Some("config")
+        }));
+    }
+}
+
 impl ServerHandler for LspiMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
@@ -303,6 +496,9 @@ impl ServerHandler for LspiMcpServer {
         request: CallToolRequestParam,
         _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        let tool = request.name.clone();
+        let input = request.arguments.clone().map(Value::Object);
+
         if self.state.read_only
             && matches!(
                 request.name.as_ref(),
@@ -334,7 +530,7 @@ impl ServerHandler for LspiMcpServer {
             });
         }
 
-        match request.name.as_ref() {
+        let result = match request.name.as_ref() {
             "get_current_config" => self.get_current_config(request).await,
             "list_servers" => self.list_servers(request).await,
             "get_server_status" => self.get_server_status(request).await,
@@ -381,6 +577,11 @@ impl ServerHandler for LspiMcpServer {
                 is_error: Some(true),
                 meta: None,
             }),
+        };
+
+        match result {
+            Ok(r) => Ok(r),
+            Err(err) => Ok(mcp_error_to_call_tool_result(&tool, input, err)),
         }
     }
 }

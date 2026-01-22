@@ -19,6 +19,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 
 - MCP tool schemas: add clearer descriptions and default/maximum hints for common parameters (`max_results`, snippet controls).
 - MCP internals: split large modules into smaller files for maintainability (no behavior change intended).
+- MCP: convert tool handler failures into structured tool errors with actionable `next_steps` hints (instead of protocol-level MCP errors).
 - LSP client: reply to common server-initiated requests (`workspace/configuration`, `workspace/workspaceFolders`, etc.) to improve generic LSP compatibility.
 - LSP transport: send `Content-Type` header, accept case-insensitive `Content-Length`, and cap maximum frame size.
 - `lspi doctor`: add Pyright preflight hints (`kind=pyright|basedpyright`).

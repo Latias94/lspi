@@ -27,6 +27,7 @@ metadata:
 - For multi-language workspaces: `search_workspace_symbols` MUST include `file_path` if multiple language servers are configured.
 - If `lspi` is started in read-only mode (`lspi mcp --read-only` or `mcp.read_only=true`), rename and server-control tools are disabled.
 - `rename_symbol` / `rename_symbol_strict` defaults to preview (`dry_run=true`). Only apply edits when explicitly requested.
+- If a tool call returns an error, look for `structuredContent.next_steps` and follow them (introspection tools + config hints).
 - After each tool call, briefly summarize what you did and what you got (method, key inputs like `file_path`/position, number of results, and whether output was truncated).
 - Most tools accept `max_results` and `max_total_chars`. For reproducible behavior, set them explicitly when needed.
 - For large result sets, consider disabling snippets (`include_snippet=false`) to keep outputs small and deterministic.

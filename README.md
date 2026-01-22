@@ -69,6 +69,8 @@ For more details, see `docs/CODEX.md`.
 
 - “No server found for extension …”:
   - Add/verify `servers[].extensions`, and ensure `file_path` matches the intended language server.
+- Tool call fails with an error:
+  - Inspect `structuredContent.next_steps` for actionable debugging steps (introspection tools + config hints).
 - Language server not starting / command not found:
   - Install the language server, or set `servers[].command` / the corresponding `LSPI_*_COMMAND` env var.
   - Run `lspi doctor --workspace-root .` for actionable hints.
