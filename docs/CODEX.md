@@ -59,6 +59,7 @@ Notes:
 - Optional: add `--context codex` for safe defaults (read-only + smaller output limits). Use `--read-write` to opt back into rename/control tools.
 - Optional: add `--mode navigation` (sugar for safe read-only defaults) or `--mode refactor` (sugar for read-write defaults).
 - Troubleshooting: use `get_current_config` / `get_server_status` to confirm routing/workspace roots and server health.
+- If a tool call fails, inspect `structuredContent.next_steps` for actionable debugging steps (then follow them).
 - If you keep `lspi` config outside the workspace, pass it explicitly:
   - `args = ["mcp", "--workspace-root", ".", "--config", "/path/to/lspi.toml"]`
 

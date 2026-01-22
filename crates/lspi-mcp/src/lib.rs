@@ -48,6 +48,20 @@ fn mcp_error_kind_name(code: i32) -> &'static str {
 fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
     let mut steps = Vec::new();
 
+    if message.contains("disabled in read-only mode") {
+        steps.push(json!({
+            "kind": "config",
+            "message": "This tool is disabled because lspi is running in read-only mode. Start lspi with `--read-write` or set `mcp.read_only=false` (config). If you used `--mode navigation` or `--context codex|navigation`, switch to `--mode refactor` or `--context full`."
+        }));
+        steps.push(json!({
+            "kind": "tool",
+            "tool": "get_current_config",
+            "arguments": {},
+            "message": "Confirm whether `read_only` is enabled and which context/mode defaults were applied."
+        }));
+        return steps;
+    }
+
     // Always include a minimal introspection path, unless the failing tool is itself introspection.
     if !matches!(
         tool,
@@ -77,6 +91,13 @@ fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
         steps.push(json!({
             "kind": "config",
             "message": "Add/verify `servers[].extensions` for this language, or pass a `file_path` with the expected extension so routing can pick the correct server."
+        }));
+    }
+
+    if message.contains("server kind is not supported yet:") {
+        steps.push(json!({
+            "kind": "config",
+            "message": "Use `kind = \"generic\"` for stdio JSON-RPC servers, or switch to a supported first-class kind (rust_analyzer, omnisharp, pyright, basedpyright)."
         }));
     }
 
@@ -515,6 +536,10 @@ impl ServerHandler for LspiMcpServer {
                 "disabled in read-only mode",
             );
             if let Some(obj) = structured.as_object_mut() {
+                let next_steps = error_next_steps(tool, "disabled in read-only mode");
+                if !next_steps.is_empty() {
+                    obj.insert("next_steps".to_string(), Value::Array(next_steps));
+                }
                 obj.insert(
                     "message".to_string(),
                     Value::String("disabled in read-only mode".to_string()),
@@ -567,6 +592,20 @@ impl ServerHandler for LspiMcpServer {
                         "not implemented yet",
                     );
                     if let Some(obj) = structured.as_object_mut() {
+                        obj.insert(
+                            "next_steps".to_string(),
+                            Value::Array(vec![
+                                json!({
+                                    "kind": "command",
+                                    "command": "lspi --version",
+                                    "message": "Confirm your lspi version."
+                                }),
+                                json!({
+                                    "kind": "doc",
+                                    "message": "Check `CHANGELOG.md` for tool availability, or upgrade lspi."
+                                }),
+                            ]),
+                        );
                         obj.insert(
                             "message".to_string(),
                             Value::String("not implemented yet".to_string()),

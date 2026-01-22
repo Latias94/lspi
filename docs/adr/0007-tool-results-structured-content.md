@@ -22,6 +22,10 @@ We also need to keep tool outputs bounded to avoid token blowups, especially for
   - `structuredContent` as the canonical machine-readable payload (JSON)
   - `content` as a short text summary and fallback for clients that ignore `structuredContent`
 - `structuredContent` MUST include `schema_version` so clients can evolve with the response shape.
+- Errors SHOULD be returned as tool results (not protocol-level errors) where possible:
+  - set `is_error=true`
+  - return a structured payload with `ok=false` and an `error` object
+  - include `next_steps` with actionable remediation hints (introspection tool calls, config changes, or suggested commands)
 - The `structuredContent` payload MUST be size-bounded:
   - tools accept `max_results` (where applicable)
   - snippets are optional and strictly limited by configured caps
