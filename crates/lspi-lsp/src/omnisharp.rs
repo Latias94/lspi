@@ -31,6 +31,8 @@ pub struct OmniSharpClientOptions {
     pub request_timeout_overrides: HashMap<String, Duration>,
     pub warmup_delay: Duration,
     pub workspace_configuration: HashMap<String, Value>,
+    pub initialize_options: Option<Value>,
+    pub client_capabilities: Option<Value>,
 }
 
 pub async fn resolve_omnisharp_command() -> Result<String> {
@@ -75,6 +77,8 @@ impl Default for OmniSharpClientOptions {
             request_timeout_overrides: HashMap::new(),
             warmup_delay: Duration::from_millis(0),
             workspace_configuration: HashMap::new(),
+            initialize_options: None,
+            client_capabilities: None,
         }
     }
 }
@@ -101,6 +105,8 @@ impl OmniSharpClient {
             request_timeout: options.request_timeout,
             request_timeout_overrides: options.request_timeout_overrides,
             workspace_configuration: options.workspace_configuration,
+            initialize_options: options.initialize_options,
+            client_capabilities: options.client_capabilities,
         })
         .await?;
 

@@ -39,6 +39,8 @@ request_timeout_ms = 30000         # optional
 warmup_timeout_ms = 5000           # optional
 # restart_interval_minutes = 30    # optional; auto-restart long-running servers
 # idle_shutdown_ms = 300000        # optional; auto-stop after being idle
+# initialize_options = {}          # optional; passed as initializationOptions
+# client_capabilities = {}         # optional; overrides the initialize.capabilities payload
 #
 # Optional: responses for server-initiated workspace/configuration requests.
 # This helps some servers (notably typescript-language-server) that expect configuration at runtime.

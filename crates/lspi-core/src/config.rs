@@ -61,6 +61,16 @@ pub struct LspServerConfig {
     /// Optional idle shutdown (milliseconds). If set, lspi may stop the server after being idle.
     #[serde(default)]
     pub idle_shutdown_ms: Option<u64>,
+    /// Optional `initializationOptions` passed to the `initialize` request.
+    /// Useful for servers that require non-standard options (most often when using `kind = "generic"`).
+    #[serde(default)]
+    #[serde(alias = "initializeOptions")]
+    pub initialize_options: Option<JsonValue>,
+    /// Optional full `capabilities` object for the `initialize` request.
+    /// If omitted, lspi uses a conservative default capability set.
+    #[serde(default)]
+    #[serde(alias = "clientCapabilities")]
+    pub client_capabilities: Option<JsonValue>,
     /// Optional responses for server-initiated `workspace/configuration` requests.
     /// Keys are the `section` values requested by the server (e.g. `formattingOptions` for TypeScript LS).
     #[serde(default)]
@@ -127,6 +137,8 @@ pub struct ResolvedServerConfig {
     pub warmup_timeout_ms: Option<u64>,
     pub restart_interval_minutes: Option<u64>,
     pub idle_shutdown_ms: Option<u64>,
+    pub initialize_options: Option<JsonValue>,
+    pub client_capabilities: Option<JsonValue>,
     pub workspace_configuration: HashMap<String, JsonValue>,
 }
 
@@ -346,6 +358,8 @@ fn resolve_server_config(
         warmup_timeout_ms: server.warmup_timeout_ms,
         restart_interval_minutes: server.restart_interval_minutes,
         idle_shutdown_ms: server.idle_shutdown_ms,
+        initialize_options: server.initialize_options.clone(),
+        client_capabilities: server.client_capabilities.clone(),
         workspace_configuration: server
             .workspace_configuration
             .clone()
@@ -374,6 +388,8 @@ fn default_rust_analyzer_server(workspace_root: &Path) -> ResolvedServerConfig {
         warmup_timeout_ms: None,
         restart_interval_minutes: None,
         idle_shutdown_ms: None,
+        initialize_options: None,
+        client_capabilities: None,
         workspace_configuration: HashMap::new(),
     }
 }
@@ -565,6 +581,75 @@ language_id = "python"
     }
 
     #[test]
+    fn toml_parses_initialize_options_and_client_capabilities() {
+        let toml = r#"
+[[servers]]
+id = "ts"
+kind = "generic"
+extensions = ["ts"]
+command = "typescript-language-server"
+args = ["--stdio"]
+language_id = "typescript"
+initialize_options = { foo = "bar", nested = { x = 1 } }
+client_capabilities = { workspace = { configuration = true } }
+"#;
+
+        let config: LspiConfig = toml::from_str(toml).unwrap();
+        let server = config.servers.unwrap().into_iter().next().unwrap();
+        assert_eq!(
+            server
+                .initialize_options
+                .and_then(|v| v.get("foo").and_then(|v| v.as_str()).map(|s| s.to_string())),
+            Some("bar".to_string())
+        );
+        assert_eq!(
+            server.client_capabilities.and_then(|v| {
+                v.get("workspace")
+                    .and_then(|v| v.get("configuration"))
+                    .and_then(|v| v.as_bool())
+            }),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn json_parses_initialize_options_and_client_capabilities_aliases() {
+        let json = r#"
+{
+  "servers": [
+    {
+      "id": "ts",
+      "kind": "generic",
+      "extensions": ["ts"],
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "languageId": "typescript",
+      "initializeOptions": { "foo": "bar" },
+      "clientCapabilities": { "workspace": { "configuration": true } }
+    }
+  ]
+}
+"#;
+
+        let config: LspiConfig = serde_json::from_str(json).unwrap();
+        let server = config.servers.unwrap().into_iter().next().unwrap();
+        assert_eq!(
+            server
+                .initialize_options
+                .and_then(|v| v.get("foo").and_then(|v| v.as_str()).map(|s| s.to_string())),
+            Some("bar".to_string())
+        );
+        assert_eq!(
+            server.client_capabilities.and_then(|v| {
+                v.get("workspace")
+                    .and_then(|v| v.get("configuration"))
+                    .and_then(|v| v.as_bool())
+            }),
+            Some(true)
+        );
+    }
+
+    #[test]
     fn route_server_by_path_prefers_longest_root_dir_match() {
         let root = temp_root("route-longest");
         let nested = root.join("nested");
@@ -585,6 +670,8 @@ language_id = "python"
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
+                initialize_options: None,
+                client_capabilities: None,
                 workspace_configuration: HashMap::new(),
             },
             ResolvedServerConfig {
@@ -601,6 +688,8 @@ language_id = "python"
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
+                initialize_options: None,
+                client_capabilities: None,
                 workspace_configuration: HashMap::new(),
             },
         ];
@@ -634,6 +723,8 @@ language_id = "python"
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
+                initialize_options: None,
+                client_capabilities: None,
                 workspace_configuration: HashMap::new(),
             },
             ResolvedServerConfig {
@@ -650,6 +741,8 @@ language_id = "python"
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
+                initialize_options: None,
+                client_capabilities: None,
                 workspace_configuration: HashMap::new(),
             },
         ];

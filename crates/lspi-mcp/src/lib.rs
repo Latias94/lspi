@@ -1166,6 +1166,8 @@ impl LspiMcpServer {
             request_timeout_overrides,
             warmup_timeout,
             workspace_configuration: server.workspace_configuration.clone(),
+            initialize_options: server.initialize_options.clone(),
+            client_capabilities: server.client_capabilities.clone(),
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -1269,6 +1271,8 @@ impl LspiMcpServer {
             request_timeout_overrides,
             warmup_delay,
             workspace_configuration: server.workspace_configuration.clone(),
+            initialize_options: server.initialize_options.clone(),
+            client_capabilities: server.client_capabilities.clone(),
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -1372,6 +1376,8 @@ impl LspiMcpServer {
             language_id,
             warmup_delay,
             workspace_configuration: server.workspace_configuration.clone(),
+            initialize_options: server.initialize_options.clone(),
+            client_capabilities: server.client_capabilities.clone(),
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -1489,6 +1495,8 @@ impl LspiMcpServer {
             language_id,
             warmup_delay,
             workspace_configuration: server.workspace_configuration.clone(),
+            initialize_options: server.initialize_options.clone(),
+            client_capabilities: server.client_capabilities.clone(),
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;

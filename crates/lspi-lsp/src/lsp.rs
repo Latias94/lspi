@@ -192,6 +192,8 @@ pub struct LspClientOptions {
     pub request_timeout: Duration,
     pub request_timeout_overrides: HashMap<String, Duration>,
     pub workspace_configuration: HashMap<String, Value>,
+    pub initialize_options: Option<Value>,
+    pub client_capabilities: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -270,7 +272,11 @@ impl LspClient {
         spawn_stderr_logger(stderr);
 
         client
-            .initialize(options.initialize_timeout)
+            .initialize(
+                options.initialize_timeout,
+                options.initialize_options.as_ref(),
+                options.client_capabilities.as_ref(),
+            )
             .await
             .context("failed to initialize LSP server")?;
 
@@ -564,37 +570,50 @@ impl LspClient {
         Ok(())
     }
 
-    async fn initialize(&self, initialize_timeout: Duration) -> Result<()> {
-        let params = serde_json::json!({
-            "processId": null,
-            "rootUri": self.root_uri,
-            "capabilities": {
-                "workspace": {
-                    "workspaceFolders": true,
-                    "configuration": true,
-                    "workspaceEdit": {
-                        "documentChanges": true
-                    }
-                },
-                "textDocument": {
-                    "documentSymbol": {
-                        "hierarchicalDocumentSymbolSupport": true
-                    },
-                    "callHierarchy": {
-                        "dynamicRegistration": true
-                    }
-                },
-                "window": {
-                    "workDoneProgress": true
-                },
-                "experimental": {
-                    "serverStatusNotification": true
+    async fn initialize(
+        &self,
+        initialize_timeout: Duration,
+        initialize_options: Option<&Value>,
+        client_capabilities: Option<&Value>,
+    ) -> Result<()> {
+        let default_capabilities = serde_json::json!({
+            "workspace": {
+                "workspaceFolders": true,
+                "configuration": true,
+                "workspaceEdit": {
+                    "documentChanges": true
                 }
             },
+            "textDocument": {
+                "documentSymbol": {
+                    "hierarchicalDocumentSymbolSupport": true
+                },
+                "callHierarchy": {
+                    "dynamicRegistration": true
+                }
+            },
+            "window": {
+                "workDoneProgress": true
+            },
+            "experimental": {
+                "serverStatusNotification": true
+            }
+        });
+
+        let mut params = serde_json::json!({
+            "processId": null,
+            "rootUri": self.root_uri,
+            "capabilities": client_capabilities.cloned().unwrap_or(default_capabilities),
             "workspaceFolders": [
                 { "uri": self.root_uri, "name": "workspace" }
             ]
         });
+
+        if let Some(v) = initialize_options
+            && let Some(obj) = params.as_object_mut()
+        {
+            obj.insert("initializationOptions".to_string(), v.clone());
+        }
 
         let _ = self
             .send_request("initialize", &params, Some(initialize_timeout))

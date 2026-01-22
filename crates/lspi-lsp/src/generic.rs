@@ -31,6 +31,8 @@ pub struct GenericLspClientOptions {
     pub language_id: String,
     pub warmup_delay: Duration,
     pub workspace_configuration: HashMap<String, Value>,
+    pub initialize_options: Option<Value>,
+    pub client_capabilities: Option<Value>,
 }
 
 pub struct GenericLspClient {
@@ -63,6 +65,8 @@ impl GenericLspClient {
             request_timeout: options.request_timeout,
             request_timeout_overrides: options.request_timeout_overrides,
             workspace_configuration: options.workspace_configuration,
+            initialize_options: options.initialize_options,
+            client_capabilities: options.client_capabilities,
         })
         .await?;
 
