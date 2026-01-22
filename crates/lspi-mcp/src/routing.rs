@@ -246,7 +246,8 @@ impl LspiMcpServer {
         let client = lspi_lsp::RustAnalyzerClient::start(lspi_lsp::RustAnalyzerClientOptions {
             command,
             args: server.args.clone(),
-            cwd: server.cwd.clone(),
+            root_dir: server.root_dir.clone(),
+            process_cwd: server.cwd.clone(),
             env: server.env.clone(),
             workspace_folders: server.workspace_folders.clone(),
             initialize_timeout,
@@ -349,7 +350,8 @@ impl LspiMcpServer {
         let client = lspi_lsp::OmniSharpClient::start(lspi_lsp::OmniSharpClientOptions {
             command,
             args,
-            cwd: server.cwd.clone(),
+            root_dir: server.root_dir.clone(),
+            process_cwd: server.cwd.clone(),
             env: server.env.clone(),
             workspace_folders: server.workspace_folders.clone(),
             initialize_timeout,
@@ -468,7 +470,8 @@ impl LspiMcpServer {
         let client = lspi_lsp::GenericLspClient::start(lspi_lsp::GenericLspClientOptions {
             command,
             args,
-            cwd: server.cwd.clone(),
+            root_dir: server.root_dir.clone(),
+            process_cwd: server.cwd.clone(),
             env: server.env.clone(),
             workspace_folders: server.workspace_folders.clone(),
             adapter,
@@ -597,7 +600,8 @@ impl LspiMcpServer {
         let client = lspi_lsp::GenericLspClient::start(lspi_lsp::GenericLspClientOptions {
             command,
             args,
-            cwd: server.cwd.clone(),
+            root_dir: server.root_dir.clone(),
+            process_cwd: server.cwd.clone(),
             env: server.env.clone(),
             workspace_folders: server.workspace_folders.clone(),
             adapter,

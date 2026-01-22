@@ -26,7 +26,8 @@ use crate::symbol::{
 pub struct RustAnalyzerClientOptions {
     pub command: String,
     pub args: Vec<String>,
-    pub cwd: PathBuf,
+    pub root_dir: PathBuf,
+    pub process_cwd: PathBuf,
     pub env: HashMap<String, String>,
     pub workspace_folders: Vec<PathBuf>,
     pub initialize_timeout: Duration,
@@ -92,10 +93,12 @@ pub async fn preflight_rust_analyzer(command: &str) -> Result<()> {
 
 impl Default for RustAnalyzerClientOptions {
     fn default() -> Self {
+        let root_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self {
             command: "rust-analyzer".to_string(),
             args: Vec::new(),
-            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            root_dir: root_dir.clone(),
+            process_cwd: root_dir,
             env: HashMap::new(),
             workspace_folders: Vec::new(),
             initialize_timeout: Duration::from_secs(10),
@@ -127,7 +130,8 @@ impl RustAnalyzerClient {
         let lsp = LspClient::start(LspClientOptions {
             command: options.command,
             args: options.args,
-            cwd: options.cwd,
+            process_cwd: options.process_cwd,
+            root_dir: options.root_dir,
             env: options.env,
             workspace_folders: options.workspace_folders,
             adapter: crate::adapter::LspAdapter::Default,

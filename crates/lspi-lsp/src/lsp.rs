@@ -192,7 +192,10 @@ pub struct ServerStatus {
 pub struct LspClientOptions {
     pub command: String,
     pub args: Vec<String>,
-    pub cwd: PathBuf,
+    /// Working directory for starting the LSP process.
+    pub process_cwd: PathBuf,
+    /// Workspace root used to build `initialize.rootUri` and the default `workspaceFolders` entry.
+    pub root_dir: PathBuf,
     pub env: HashMap<String, String>,
     pub workspace_folders: Vec<PathBuf>,
     pub adapter: LspAdapter,
@@ -232,7 +235,9 @@ pub struct LspClient {
 impl LspClient {
     pub async fn start(options: LspClientOptions) -> Result<Self> {
         let mut command = Command::new(&options.command);
-        command.args(&options.args).current_dir(&options.cwd);
+        command
+            .args(&options.args)
+            .current_dir(&options.process_cwd);
         for (k, v) in &options.env {
             command.env(k, v);
         }
@@ -259,8 +264,8 @@ impl LspClient {
             .ok_or_else(|| anyhow!("failed to capture LSP stderr"))?;
 
         let (server_status_tx, server_status_rx) = watch::channel(None);
-        let root_uri = Url::from_directory_path(&options.cwd)
-            .map_err(|_| anyhow!("failed to build rootUri for {:?}", options.cwd))?
+        let root_uri = Url::from_directory_path(&options.root_dir)
+            .map_err(|_| anyhow!("failed to build rootUri for {:?}", options.root_dir))?
             .to_string();
 
         let mut workspace_folders = Vec::<WorkspaceFolder>::new();

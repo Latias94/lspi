@@ -24,7 +24,8 @@ use crate::symbol::{
 pub struct GenericLspClientOptions {
     pub command: String,
     pub args: Vec<String>,
-    pub cwd: PathBuf,
+    pub root_dir: PathBuf,
+    pub process_cwd: PathBuf,
     pub env: HashMap<String, String>,
     pub workspace_folders: Vec<PathBuf>,
     pub adapter: crate::adapter::LspAdapter,
@@ -63,7 +64,8 @@ impl GenericLspClient {
         let lsp = LspClient::start(LspClientOptions {
             command: options.command,
             args: options.args,
-            cwd: options.cwd,
+            process_cwd: options.process_cwd,
+            root_dir: options.root_dir,
             env: options.env,
             workspace_folders: options.workspace_folders,
             adapter: options.adapter,
