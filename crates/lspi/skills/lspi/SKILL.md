@@ -28,8 +28,9 @@ metadata:
 - `rename_symbol` / `rename_symbol_strict` defaults to preview (`dry_run=true`). Only apply edits when explicitly requested.
 - Most tools accept `max_results` and `max_total_chars`. For reproducible behavior, set them explicitly when needed.
 - For large result sets, consider disabling snippets (`include_snippet=false`) to keep outputs small and deterministic.
+- If a generic LSP server returns empty/odd results, suggest tuning per-server config: `initialize_options`, `client_capabilities`, and `workspace_configuration`.
 
-## Recommended workflow (read → verify → change)
+## Recommended workflow (read -> verify -> change)
 
 1) Gather context:
    - `hover_at` (fast type/doc check)

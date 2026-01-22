@@ -115,7 +115,7 @@ See [`docs/SMOKE_TEST.md`](docs/SMOKE_TEST.md) for end-to-end scripts (Rust/C#/T
 - `get_diagnostics`
 - `restart_server`, `stop_server`
 
-If you want a “least privilege” toolset (e.g. read-only navigation), use `mcp.tools` allow/exclude in your config. See [`docs/CONFIG.md`](docs/CONFIG.md).
+If you want a "least privilege" toolset (e.g. read-only navigation), use `mcp.tools` allow/exclude in your config. See [`docs/CONFIG.md`](docs/CONFIG.md).
 
 ## Development
 
