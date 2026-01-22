@@ -5486,18 +5486,20 @@ fn canonicalize_within(workspace_root: &Path, file_path: &Path) -> anyhow::Resul
 fn tool_find_definition() -> Tool {
     Tool::new(
         Cow::Borrowed("find_definition"),
-        Cow::Borrowed("Find definition locations for a symbol in a file."),
+        Cow::Borrowed(
+            "Find definition locations for a symbol in a file (name-based; may need disambiguation).",
+        ),
         Arc::new(schema(json!({
             "type": "object",
             "properties": {
                 "file_path": { "type": "string" },
                 "symbol_name": { "type": "string" },
                 "symbol_kind": { "type": "string" },
-                "max_results": { "type": "integer", "minimum": 1 },
+                "max_results": { "type": "integer", "minimum": 1, "default": 20, "maximum": 200 },
                 "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 },
                 "include_snippet": { "type": "boolean", "default": true },
-                "snippet_context_lines": { "type": "integer", "minimum": 0, "default": 1 },
-                "max_snippet_chars": { "type": "integer", "minimum": 40, "default": 400 }
+                "snippet_context_lines": { "type": "integer", "minimum": 0, "default": 1, "maximum": 10 },
+                "max_snippet_chars": { "type": "integer", "minimum": 40, "default": 400, "maximum": 4000 }
             },
             "required": ["file_path", "symbol_name"],
             "additionalProperties": false
@@ -5515,11 +5517,11 @@ fn tool_find_definition_at() -> Tool {
                 "file_path": { "type": "string" },
                 "line": { "type": "integer", "minimum": 1 },
                 "character": { "type": "integer", "minimum": 1 },
-                "max_results": { "type": "integer", "minimum": 1 },
+                "max_results": { "type": "integer", "minimum": 1, "default": 50, "maximum": 500 },
                 "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 },
                 "include_snippet": { "type": "boolean", "default": true },
-                "snippet_context_lines": { "type": "integer", "minimum": 0, "default": 1 },
-                "max_snippet_chars": { "type": "integer", "minimum": 40, "default": 400 }
+                "snippet_context_lines": { "type": "integer", "minimum": 0, "default": 1, "maximum": 10 },
+                "max_snippet_chars": { "type": "integer", "minimum": 40, "default": 400, "maximum": 4000 }
             },
             "required": ["file_path", "line", "character"],
             "additionalProperties": false
@@ -5530,7 +5532,9 @@ fn tool_find_definition_at() -> Tool {
 fn tool_find_references() -> Tool {
     Tool::new(
         Cow::Borrowed("find_references"),
-        Cow::Borrowed("Find references for a symbol across the workspace."),
+        Cow::Borrowed(
+            "Find references for a symbol across the workspace (name-based; may be truncated by max_results).",
+        ),
         Arc::new(schema(json!({
             "type": "object",
             "properties": {
@@ -5538,11 +5542,11 @@ fn tool_find_references() -> Tool {
                 "symbol_name": { "type": "string" },
                 "symbol_kind": { "type": "string" },
                 "include_declaration": { "type": "boolean", "default": true },
-                "max_results": { "type": "integer", "minimum": 1 },
+                "max_results": { "type": "integer", "minimum": 1, "default": 200, "maximum": 5000 },
                 "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 },
                 "include_snippet": { "type": "boolean", "default": false },
-                "snippet_context_lines": { "type": "integer", "minimum": 0 },
-                "max_snippet_chars": { "type": "integer", "minimum": 40, "default": 400 }
+                "snippet_context_lines": { "type": "integer", "minimum": 0, "default": 1, "maximum": 10 },
+                "max_snippet_chars": { "type": "integer", "minimum": 40, "default": 400, "maximum": 4000 }
             },
             "required": ["file_path", "symbol_name"],
             "additionalProperties": false
@@ -5561,11 +5565,11 @@ fn tool_find_references_at() -> Tool {
                 "line": { "type": "integer", "minimum": 1 },
                 "character": { "type": "integer", "minimum": 1 },
                 "include_declaration": { "type": "boolean", "default": true },
-                "max_results": { "type": "integer", "minimum": 1 },
+                "max_results": { "type": "integer", "minimum": 1, "default": 200, "maximum": 5000 },
                 "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 },
                 "include_snippet": { "type": "boolean", "default": false },
-                "snippet_context_lines": { "type": "integer", "minimum": 0 },
-                "max_snippet_chars": { "type": "integer", "minimum": 40, "default": 400 }
+                "snippet_context_lines": { "type": "integer", "minimum": 0, "default": 1, "maximum": 10 },
+                "max_snippet_chars": { "type": "integer", "minimum": 40, "default": 400, "maximum": 4000 }
             },
             "required": ["file_path", "line", "character"],
             "additionalProperties": false
@@ -5803,7 +5807,9 @@ fn tool_rename_symbol_strict() -> Tool {
 fn tool_get_diagnostics() -> Tool {
     Tool::new(
         Cow::Borrowed("get_diagnostics"),
-        Cow::Borrowed("Get diagnostics for a file."),
+        Cow::Borrowed(
+            "Get diagnostics for a file (pull if supported; otherwise cached publishDiagnostics).",
+        ),
         Arc::new(schema(json!({
             "type": "object",
             "properties": {
