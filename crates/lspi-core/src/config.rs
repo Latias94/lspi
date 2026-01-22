@@ -100,6 +100,10 @@ pub struct LspServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct McpConfig {
+    /// Optional MCP context preset (e.g. "codex", "navigation", "full").
+    /// Contexts apply defaults for output limits and safety posture, without overriding explicit config.
+    #[serde(default)]
+    pub context: Option<String>,
     /// If true, lspi exposes a read-only MCP toolset (navigation/diagnostics only).
     /// This disables rename and server-control tools regardless of `mcp.tools.allow/exclude`.
     #[serde(default)]

@@ -18,6 +18,27 @@ Discovery order (first match wins):
 
 Overrides the workspace root used for safety checks and path resolution.
 
+### `mcp.context` (optional)
+
+Context preset for MCP usage. This applies safe defaults without overriding explicit config.
+
+Supported presets:
+
+- `full` (default behavior)
+- `codex` (safe defaults for Codex-style clients)
+- `navigation` (read-only navigation defaults)
+
+Example:
+
+```toml
+[mcp]
+context = "codex"
+```
+
+Notes:
+
+- `context="codex"` and `context="navigation"` default to `mcp.read_only=true` unless you set `mcp.read_only=false` or run `lspi mcp --read-write`.
+
 ### `servers` (recommended)
 
 ```toml
@@ -259,8 +280,13 @@ Expose a read-only MCP toolset (navigation/diagnostics only). This disables:
 read_only = true
 ```
 
-## CLI helper
+CLI override:
 
+- Force enable: `lspi mcp --read-only`
+- Force disable: `lspi mcp --read-write`
+
+## CLI helper
+ 
 Generate a starter config:
 
 ```bash

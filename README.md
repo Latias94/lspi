@@ -60,6 +60,7 @@ Notes:
   - `args = ["mcp", "--workspace-root", ".", "--config", "/path/to/lspi.toml"]`
 - Optional: add `--warmup` to start language servers eagerly (reduces first-tool-call latency).
 - Optional: add `--read-only` (or set `mcp.read_only=true`) to expose a navigation-only toolset.
+- Optional: add `--context codex` for safe defaults (read-only + smaller output limits). Use `--read-write` to opt back into rename/control tools.
 
 For more details, see `docs/CODEX.md`.
 

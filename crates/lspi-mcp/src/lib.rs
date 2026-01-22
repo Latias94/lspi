@@ -42,7 +42,9 @@ pub struct McpOptions {
     pub config_path: Option<PathBuf>,
     pub workspace_root: Option<PathBuf>,
     pub warmup: bool,
+    pub context: Option<String>,
     pub read_only: bool,
+    pub read_write: bool,
 }
 
 pub async fn run_stdio_with_options(options: McpOptions) -> Result<()> {
@@ -67,19 +69,32 @@ impl LspiMcpServer {
             options.workspace_root.as_deref(),
         )?;
         let workspace_root = loaded.workspace_root;
-        let servers = lspi_core::config::resolved_servers(&loaded.config, &workspace_root);
+
+        let mut config = loaded.config;
+        let context = options
+            .context
+            .clone()
+            .or_else(|| config.mcp.as_ref().and_then(|m| m.context.clone()));
+        apply_mcp_context_defaults(context.as_deref(), &mut config);
+
+        let servers = lspi_core::config::resolved_servers(&config, &workspace_root);
         let allowed_roots = compute_allowed_roots(&workspace_root, &servers);
 
         let all_tools = tools::all_tools();
-        let cfg_read_only = loaded
-            .config
+        let cfg_read_only = config
             .mcp
             .as_ref()
             .and_then(|m| m.read_only)
             .unwrap_or(false);
-        let read_only = options.read_only || cfg_read_only;
+        let read_only = if options.read_write {
+            false
+        } else if options.read_only {
+            true
+        } else {
+            cfg_read_only
+        };
 
-        let tools = tools::filter_tools_by_config(all_tools, loaded.config.mcp.as_ref());
+        let tools = tools::filter_tools_by_config(all_tools, config.mcp.as_ref());
         let tools = if read_only {
             tools::filter_tools_read_only(tools)
         } else {
@@ -92,7 +107,7 @@ impl LspiMcpServer {
                 workspace_root,
                 allowed_roots,
                 read_only,
-                config: loaded.config,
+                config,
                 servers,
                 rust_analyzer: Mutex::new(HashMap::new()),
                 omnisharp: Mutex::new(HashMap::new()),
@@ -161,6 +176,99 @@ impl LspiMcpServer {
             );
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum McpContext {
+    Full,
+    Codex,
+    Navigation,
+}
+
+fn parse_mcp_context(value: &str) -> Option<McpContext> {
+    let normalized = value.trim().to_ascii_lowercase().replace(['-', '_'], "");
+    match normalized.as_str() {
+        "" => None,
+        "full" | "default" => Some(McpContext::Full),
+        "codex" => Some(McpContext::Codex),
+        "navigation" | "nav" | "readonly" | "read" => Some(McpContext::Navigation),
+        _ => None,
+    }
+}
+
+fn apply_mcp_context_defaults(context: Option<&str>, config: &mut lspi_core::config::LspiConfig) {
+    let Some(ctx) = context.and_then(parse_mcp_context) else {
+        return;
+    };
+
+    config
+        .mcp
+        .get_or_insert_with(|| lspi_core::config::McpConfig {
+            context: None,
+            read_only: None,
+            output: None,
+            tools: None,
+        });
+
+    let mcp = config.mcp.as_mut().unwrap();
+
+    // Preserve explicit config. Only fill in defaults.
+    match ctx {
+        McpContext::Full => {}
+        McpContext::Codex | McpContext::Navigation => {
+            if mcp.read_only.is_none() {
+                mcp.read_only = Some(true);
+            }
+        }
+    }
+
+    // Output defaults: keep Codex outputs smaller by default.
+    let output = mcp
+        .output
+        .get_or_insert_with(|| lspi_core::config::McpOutputConfig {
+            max_total_chars_default: None,
+            max_total_chars_hard: None,
+        });
+
+    if output.max_total_chars_default.is_none() {
+        output.max_total_chars_default = Some(match ctx {
+            McpContext::Full => 120_000,
+            McpContext::Codex => 80_000,
+            McpContext::Navigation => 60_000,
+        });
+    }
+}
+
+#[cfg(test)]
+mod mcp_context_tests {
+    use super::*;
+
+    #[test]
+    fn codex_context_defaults_to_read_only_and_smaller_output() {
+        let mut cfg = lspi_core::config::LspiConfig::default();
+        apply_mcp_context_defaults(Some("codex"), &mut cfg);
+        let mcp = cfg.mcp.unwrap();
+        assert_eq!(mcp.read_only, Some(true));
+        assert_eq!(mcp.output.unwrap().max_total_chars_default, Some(80_000));
+    }
+
+    #[test]
+    fn explicit_read_only_is_not_overridden_by_context() {
+        let mut cfg = lspi_core::config::LspiConfig::default();
+        cfg.mcp = Some(lspi_core::config::McpConfig {
+            context: Some("codex".to_string()),
+            read_only: Some(false),
+            output: None,
+            tools: None,
+        });
+        let ctx = cfg
+            .mcp
+            .as_ref()
+            .and_then(|m| m.context.as_deref())
+            .map(|s| s.to_string());
+        apply_mcp_context_defaults(ctx.as_deref(), &mut cfg);
+        assert_eq!(cfg.mcp.unwrap().read_only, Some(false));
     }
 }
 

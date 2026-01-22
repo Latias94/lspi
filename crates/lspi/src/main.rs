@@ -50,9 +50,15 @@ enum Command {
         /// Start language servers eagerly (reduces first-tool-call latency)
         #[arg(long)]
         warmup: bool,
+        /// Context preset (e.g. "codex", "navigation", "full")
+        #[arg(long)]
+        context: Option<String>,
         /// Expose a read-only toolset (disable rename and server-control tools)
         #[arg(long)]
         read_only: bool,
+        /// Force read-write toolset (overrides config/context read-only defaults)
+        #[arg(long, conflicts_with = "read_only")]
+        read_write: bool,
     },
     /// Print environment/config diagnostics for lspi
     Doctor {
@@ -131,13 +137,17 @@ async fn main() -> Result<()> {
             config,
             workspace_root,
             warmup,
+            context,
             read_only,
+            read_write,
         } => {
             lspi_mcp::run_stdio_with_options(lspi_mcp::McpOptions {
                 config_path: config,
                 workspace_root,
                 warmup,
+                context,
                 read_only,
+                read_write,
             })
             .await
         }
