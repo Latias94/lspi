@@ -193,6 +193,7 @@ pub struct LspClientOptions {
     pub command: String,
     pub args: Vec<String>,
     pub cwd: PathBuf,
+    pub env: HashMap<String, String>,
     pub workspace_folders: Vec<PathBuf>,
     pub adapter: LspAdapter,
     pub initialize_timeout: Duration,
@@ -231,9 +232,11 @@ pub struct LspClient {
 impl LspClient {
     pub async fn start(options: LspClientOptions) -> Result<Self> {
         let mut command = Command::new(&options.command);
+        command.args(&options.args).current_dir(&options.cwd);
+        for (k, v) in &options.env {
+            command.env(k, v);
+        }
         command
-            .args(&options.args)
-            .current_dir(&options.cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());

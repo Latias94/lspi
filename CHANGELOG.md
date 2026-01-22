@@ -31,6 +31,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 - Server config: `servers[].request_timeout_overrides_ms` for per-method request timeouts (useful for slow workspace-wide operations).
 - Server config: `servers[].initialize_options` / `servers[].client_capabilities` for customizing LSP `initialize` payloads (helps generic servers that require non-default options/capabilities).
 - Server config: `servers[].workspace_folders` for including additional `workspaceFolders` in LSP `initialize` (multi-root workspaces).
+- Server config: `servers[].cwd` / `servers[].env` for setting the LSP process working directory and environment variables.
 - Server config: `servers[].adapter` for server-specific quirks (initially: `tsserver` for TypeScript/Vue tooling).
 - Server kind: `pyright` / `basedpyright` (auto-resolves commands, applies sensible default per-method timeouts).
 

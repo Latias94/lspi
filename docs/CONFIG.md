@@ -26,11 +26,14 @@ id = "rust-analyzer"               # optional but recommended
 kind = "rust_analyzer"             # required (supported: rust_analyzer, omnisharp, generic, pyright, basedpyright)
 extensions = ["rs"]                # required (no leading dots)
 # root_dir = "."                   # optional; absolute or relative to workspace_root
+# cwd = "."                        # optional; working directory for starting the LSP process (defaults to root_dir)
 # workspace_folders = []           # optional; extra workspace folders (absolute or relative to workspace_root)
 # adapter = "default"              # optional; server-specific quirks (generic LSP), e.g. "tsserver"
 # command = "rust-analyzer"        # optional; defaults to auto-resolve
 # args = []                        # optional
 # language_id = "rust"             # optional; used by kind="generic" (best-effort default from extension)
+# [servers.env]                    # optional; environment variables for the LSP process
+# SOME_VAR = "value"
 initialize_timeout_ms = 10000      # optional
 request_timeout_ms = 30000         # optional
 # Optional: per-method request timeouts (milliseconds). Useful for servers where some
@@ -106,6 +109,7 @@ Notes:
 
 - `language_id` controls the `textDocument/didOpen` languageId. If omitted, `lspi` guesses from the first extension.
 - For `kind = "generic"`, `command` is required (no auto-resolve).
+- Some servers require a specific working directory or environment. Use `cwd` and `[servers.env]` when needed.
 
 ### Generic LSP example (Go / gopls)
 

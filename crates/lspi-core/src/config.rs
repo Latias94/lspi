@@ -44,6 +44,16 @@ pub struct LspServerConfig {
     #[serde(default)]
     #[serde(alias = "rootDir")]
     pub root_dir: Option<PathBuf>,
+    /// Optional working directory (cwd) for starting the language server process.
+    /// If omitted, lspi uses `root_dir` (or `workspace_root` if `root_dir` is omitted).
+    #[serde(default)]
+    #[serde(alias = "cwd")]
+    pub cwd: Option<PathBuf>,
+    /// Optional environment variables for the language server process.
+    /// Values are passed as-is to the child process.
+    #[serde(default)]
+    #[serde(alias = "environment")]
+    pub env: Option<HashMap<String, String>>,
     /// Optional additional workspace folders to include in the LSP `initialize` request.
     /// Paths can be absolute or relative to `workspace_root`.
     #[serde(default)]
@@ -140,7 +150,9 @@ pub struct ResolvedServerConfig {
     pub extensions: Vec<String>,
     pub language_id: Option<String>,
     pub root_dir: PathBuf,
+    pub cwd: PathBuf,
     pub workspace_folders: Vec<PathBuf>,
+    pub env: HashMap<String, String>,
     pub adapter: Option<String>,
     pub initialize_timeout_ms: Option<u64>,
     pub request_timeout_ms: Option<u64>,
@@ -333,6 +345,10 @@ fn resolve_server_config(
         .collect::<Vec<_>>();
 
     let root_dir = resolve_root_dir(workspace_root, server.root_dir.as_deref());
+    let cwd = match server.cwd.as_deref() {
+        Some(p) => resolve_root_dir(workspace_root, Some(p)),
+        None => root_dir.clone(),
+    };
     let workspace_folders = server
         .workspace_folders
         .clone()
@@ -347,6 +363,17 @@ fn resolve_server_config(
             }
         })
         .collect::<Vec<_>>();
+
+    let env = server
+        .env
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(k, v)| {
+            let key = k.trim().to_string();
+            if key.is_empty() { None } else { Some((key, v)) }
+        })
+        .collect::<HashMap<_, _>>();
 
     let adapter = server
         .adapter
@@ -370,7 +397,9 @@ fn resolve_server_config(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
         root_dir,
+        cwd,
         workspace_folders,
+        env,
         adapter,
         initialize_timeout_ms: server.initialize_timeout_ms,
         request_timeout_ms: server.request_timeout_ms,
@@ -415,7 +444,9 @@ fn default_rust_analyzer_server(workspace_root: &Path) -> ResolvedServerConfig {
         extensions: vec!["rs".to_string()],
         language_id: Some("rust".to_string()),
         root_dir: workspace_root.to_path_buf(),
+        cwd: workspace_root.to_path_buf(),
         workspace_folders: Vec::new(),
+        env: HashMap::new(),
         adapter: None,
         initialize_timeout_ms: None,
         request_timeout_ms: None,
@@ -666,6 +697,34 @@ adapter = "tsserver"
     }
 
     #[test]
+    fn toml_parses_env_and_cwd() {
+        let toml = r#"
+[[servers]]
+id = "ts"
+kind = "generic"
+extensions = ["ts"]
+command = "typescript-language-server"
+args = ["--stdio"]
+cwd = "apps/web"
+
+[servers.env]
+NODE_OPTIONS = "--max-old-space-size=4096"
+"#;
+
+        let config: LspiConfig = toml::from_str(toml).unwrap();
+        let server = config.servers.unwrap().into_iter().next().unwrap();
+        assert_eq!(server.cwd, Some(PathBuf::from("apps/web")));
+        assert_eq!(
+            server
+                .env
+                .as_ref()
+                .and_then(|m| m.get("NODE_OPTIONS"))
+                .map(|s| s.as_str()),
+            Some("--max-old-space-size=4096")
+        );
+    }
+
+    #[test]
     fn json_parses_initialize_options_and_client_capabilities_aliases() {
         let json = r#"
 {
@@ -742,7 +801,9 @@ adapter = "tsserver"
                 extensions: vec!["rs".to_string()],
                 language_id: None,
                 root_dir: root.clone(),
+                cwd: root.clone(),
                 workspace_folders: Vec::new(),
+                env: HashMap::new(),
                 adapter: None,
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
@@ -762,7 +823,9 @@ adapter = "tsserver"
                 extensions: vec!["rs".to_string()],
                 language_id: None,
                 root_dir: nested.clone(),
+                cwd: nested.clone(),
                 workspace_folders: Vec::new(),
+                env: HashMap::new(),
                 adapter: None,
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
@@ -799,7 +862,9 @@ adapter = "tsserver"
                 extensions: vec!["rs".to_string()],
                 language_id: None,
                 root_dir: root.join("does-not-contain"),
+                cwd: root.join("does-not-contain"),
                 workspace_folders: Vec::new(),
+                env: HashMap::new(),
                 adapter: None,
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
@@ -819,7 +884,9 @@ adapter = "tsserver"
                 extensions: vec!["rs".to_string()],
                 language_id: None,
                 root_dir: root.join("also-does-not-contain"),
+                cwd: root.join("also-does-not-contain"),
                 workspace_folders: Vec::new(),
+                env: HashMap::new(),
                 adapter: None,
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,

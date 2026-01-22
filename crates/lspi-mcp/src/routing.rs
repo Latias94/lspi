@@ -246,7 +246,8 @@ impl LspiMcpServer {
         let client = lspi_lsp::RustAnalyzerClient::start(lspi_lsp::RustAnalyzerClientOptions {
             command,
             args: server.args.clone(),
-            cwd: server.root_dir.clone(),
+            cwd: server.cwd.clone(),
+            env: server.env.clone(),
             workspace_folders: server.workspace_folders.clone(),
             initialize_timeout,
             request_timeout,
@@ -348,7 +349,8 @@ impl LspiMcpServer {
         let client = lspi_lsp::OmniSharpClient::start(lspi_lsp::OmniSharpClientOptions {
             command,
             args,
-            cwd: server.root_dir.clone(),
+            cwd: server.cwd.clone(),
+            env: server.env.clone(),
             workspace_folders: server.workspace_folders.clone(),
             initialize_timeout,
             request_timeout,
@@ -466,7 +468,8 @@ impl LspiMcpServer {
         let client = lspi_lsp::GenericLspClient::start(lspi_lsp::GenericLspClientOptions {
             command,
             args,
-            cwd: server.root_dir.clone(),
+            cwd: server.cwd.clone(),
+            env: server.env.clone(),
             workspace_folders: server.workspace_folders.clone(),
             adapter,
             initialize_timeout,
@@ -594,7 +597,8 @@ impl LspiMcpServer {
         let client = lspi_lsp::GenericLspClient::start(lspi_lsp::GenericLspClientOptions {
             command,
             args,
-            cwd: server.root_dir.clone(),
+            cwd: server.cwd.clone(),
+            env: server.env.clone(),
             workspace_folders: server.workspace_folders.clone(),
             adapter,
             initialize_timeout,
