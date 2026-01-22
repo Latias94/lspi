@@ -24,7 +24,19 @@ With `lspi`, your agent can:
 - `lspi` starts and manages one or more LSP servers (your choice) and routes requests by file path / extension.
 - Tool results are returned as **structured** MCP responses, with output caps to keep results deterministic.
 
-## Quickstart (Codex)
+## Quickstart (Codex, from zero)
+
+0) Install language server(s)
+
+`lspi` does not bundle language servers. Install what you need:
+
+- Rust (recommended): `rustup component add rust-analyzer`
+- Go: `go install golang.org/x/tools/gopls@latest`
+- TypeScript: `npm i -g typescript typescript-language-server`
+- Python: `npm i -g pyright`
+- C# (OmniSharp): install `omnisharp` and ensure `dotnet` is available
+
+If you prefer project-local installs (recommended for TS/Python), set `servers[].command` accordingly.
 
 1) Install `lspi` (one-time):
 
@@ -43,6 +55,8 @@ lspi setup --wizard --non-interactive --write
 
 ```bash
 lspi doctor --workspace-root .
+# or machine-readable:
+lspi doctor --workspace-root . --json
 ```
 
 4) Configure Codex MCP (`~/.codex/config.toml`):
@@ -52,6 +66,11 @@ lspi doctor --workspace-root .
 command = "lspi"
 args = ["mcp", "--workspace-root", "."]
 ```
+
+5) First tool calls (sanity check)
+
+- Prefer introspection first: `get_current_config`, `list_servers`, `get_server_status`
+- Then navigation: `hover_at`, `find_definition_at`, `find_references_at`, `get_document_symbols`
 
 Notes:
 
@@ -107,6 +126,14 @@ TypeScript/Vue tooling tends to be more quirky; `lspi` includes a small adapter 
 Yes. `lspi` does not bundle any language servers. Install the servers you need and point `lspi` at them via config.
 Use `lspi doctor --workspace-root .` to validate your setup.
 
+### How do I install common language servers?
+
+- Rust: `rustup component add rust-analyzer`
+- Go: `go install golang.org/x/tools/gopls@latest`
+- TypeScript: `npm i -g typescript typescript-language-server` (or install in the project and set `servers[].command`)
+- Python: `npm i -g pyright` (or install in the project and set `servers[].command`)
+- C#: install OmniSharp (`omnisharp`) and ensure `dotnet` is available
+
 ### Are Go / TypeScript supported?
 
 Yes, via `kind = "generic"` (provided the LSP server speaks JSON-RPC over stdio).
@@ -123,6 +150,17 @@ Configure additional roots with `servers[].workspace_folders`. If you configure 
 ### Will `lspi` modify my files automatically?
 
 No. Rename tools default to preview mode (`dry_run=true`), and you must explicitly request applying edits (`dry_run=false`).
+
+### What should I do when a tool call fails?
+
+- Inspect `structuredContent.error` and follow `structuredContent.next_steps`.
+- Use introspection tools: `get_current_config`, `list_servers`, `get_server_status`.
+- If you can run local commands: `lspi doctor --workspace-root . --json`.
+
+### Why are results truncated?
+
+To keep agent/tool behavior deterministic, responses are size-bounded.
+Tune `max_results` / `max_total_chars`, and consider `include_snippet=false` for large reference sets.
 
 ## Configuration (what you will actually tweak)
 
