@@ -20,4 +20,4 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-tempfile = "3.14.0"
+tempfile = "3"
