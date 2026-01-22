@@ -108,7 +108,7 @@ fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
         }));
         steps.push(json!({
             "kind": "command",
-            "command": "lspi doctor --workspace-root .",
+            "command": "lspi doctor --workspace-root . --json",
             "message": "Run doctor to verify language server installation and provide install hints."
         }));
     }
@@ -116,12 +116,63 @@ fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
     if message.contains("pyright preflight failed") {
         steps.push(json!({
             "kind": "command",
-            "command": "lspi doctor --workspace-root .",
+            "command": "lspi doctor --workspace-root . --json",
             "message": "Run doctor to validate Pyright/basedpyright availability and see install hints."
         }));
         steps.push(json!({
             "kind": "config",
             "message": "If you have multiple Python tooling installs, set `servers[].command` explicitly (or `LSPI_PYRIGHT_COMMAND` / `LSPI_BASEDPYRIGHT_COMMAND`)."
+        }));
+    }
+
+    if message.contains("failed to spawn LSP server:")
+        || message.contains("failed to capture LSP stdin")
+        || message.contains("failed to capture LSP stdout")
+        || message.contains("failed to capture LSP stderr")
+    {
+        steps.push(json!({
+            "kind": "command",
+            "command": "lspi doctor --workspace-root . --json",
+            "message": "Run doctor to confirm the resolved server command and basic preflight checks."
+        }));
+        steps.push(json!({
+            "kind": "config",
+            "message": "Verify `servers[].command`, `servers[].cwd`, and `[servers.env]` (PATH / runtime deps)."
+        }));
+    }
+
+    if message.contains("failed to build rootUri")
+        || message.contains("failed to build workspaceFolder URI")
+        || message.contains("failed to build rootUri for")
+    {
+        steps.push(json!({
+            "kind": "config",
+            "message": "Verify `servers[].root_dir` and `servers[].workspace_folders` paths exist and are valid directories."
+        }));
+    }
+
+    if message.contains("failed to initialize LSP server") {
+        steps.push(json!({
+            "kind": "config",
+            "message": "Increase `servers[].initialize_timeout_ms` for this server, and verify the server can start in this workspace (root_dir/workspace_folders)."
+        }));
+        steps.push(json!({
+            "kind": "command",
+            "command": "lspi doctor --workspace-root . --json",
+            "message": "Run doctor to confirm the resolved command and preflight status."
+        }));
+    }
+
+    if message.contains("-32601") || message.to_ascii_lowercase().contains("method not found") {
+        steps.push(json!({
+            "kind": "config",
+            "message": "The language server likely does not support this method/capability. Consider using an alternative tool, upgrading the server, or switching server kind/adapter."
+        }));
+        steps.push(json!({
+            "kind": "tool",
+            "tool": "get_server_status",
+            "arguments": {},
+            "message": "Check server status and last error (if any)."
         }));
     }
 
@@ -138,6 +189,12 @@ fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
         steps.push(json!({
             "kind": "config",
             "message": "Increase `servers[].request_timeout_ms` or set `servers[].request_timeout_overrides_ms` for slow methods (definition/references/rename/documentSymbol)."
+        }));
+        steps.push(json!({
+            "kind": "tool",
+            "tool": "get_server_status",
+            "arguments": {},
+            "message": "Confirm the server is running and not stuck. Consider `restart_server` if it keeps timing out."
         }));
     }
 
@@ -465,7 +522,7 @@ mod mcp_error_mapping_tests {
             v.as_object()
                 .and_then(|o| o.get("command"))
                 .and_then(|c| c.as_str())
-                == Some("lspi doctor --workspace-root .")
+                == Some("lspi doctor --workspace-root . --json")
         }));
     }
 
