@@ -2,25 +2,26 @@ use rmcp::model::Tool;
 use tracing::warn;
 
 pub(crate) fn all_tools() -> Vec<Tool> {
+    use crate::tool_schemas as schemas;
     vec![
-        crate::tool_find_definition(),
-        crate::tool_find_definition_at(),
-        crate::tool_find_references(),
-        crate::tool_find_references_at(),
-        crate::tool_hover_at(),
-        crate::tool_find_implementation_at(),
-        crate::tool_find_type_definition_at(),
-        crate::tool_find_incoming_calls(),
-        crate::tool_find_outgoing_calls(),
-        crate::tool_find_incoming_calls_at(),
-        crate::tool_find_outgoing_calls_at(),
-        crate::tool_get_document_symbols(),
-        crate::tool_search_workspace_symbols(),
-        crate::tool_rename_symbol(),
-        crate::tool_rename_symbol_strict(),
-        crate::tool_get_diagnostics(),
-        crate::tool_restart_server(),
-        crate::tool_stop_server(),
+        schemas::tool_find_definition(),
+        schemas::tool_find_definition_at(),
+        schemas::tool_find_references(),
+        schemas::tool_find_references_at(),
+        schemas::tool_hover_at(),
+        schemas::tool_find_implementation_at(),
+        schemas::tool_find_type_definition_at(),
+        schemas::tool_find_incoming_calls(),
+        schemas::tool_find_outgoing_calls(),
+        schemas::tool_find_incoming_calls_at(),
+        schemas::tool_find_outgoing_calls_at(),
+        schemas::tool_get_document_symbols(),
+        schemas::tool_search_workspace_symbols(),
+        schemas::tool_rename_symbol(),
+        schemas::tool_rename_symbol_strict(),
+        schemas::tool_get_diagnostics(),
+        schemas::tool_restart_server(),
+        schemas::tool_stop_server(),
     ]
 }
 

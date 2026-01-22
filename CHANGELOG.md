@@ -14,8 +14,11 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 ### Changed
 
 - MCP tool schemas: add clearer descriptions and default/maximum hints for common parameters (`max_results`, snippet controls).
+- MCP internals: split large modules into smaller files for maintainability (no behavior change intended).
 - LSP client: reply to common server-initiated requests (`workspace/configuration`, `workspace/workspaceFolders`, etc.) to improve generic LSP compatibility.
 - `lspi doctor`: add Pyright preflight hints (`kind=pyright|basedpyright`).
+- Build: relax dependency version specifiers and upgrade `rmcp` to `0.13`.
+- Repo hygiene: ignore IntelliJ project files (`.idea/`, `*.iml`).
 
 ### Added
 
