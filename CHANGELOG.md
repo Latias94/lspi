@@ -10,6 +10,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 
 - LSP client: avoid leaking pending requests when a request write fails or times out.
 - LSP client: omit `params` for `shutdown`/`exit` when params is null (improves compatibility with strict servers).
+- LSP client: send `$/cancelRequest` when a request times out (reduces wasted server work and follow-up latency).
 - MCP: harden backup file path generation to prevent path traversal via `backup_suffix`.
 - MCP: allow reads/writes within configured `servers[].workspace_folders` (multi-root workspaces) instead of limiting strictly to `workspace_root`.
 

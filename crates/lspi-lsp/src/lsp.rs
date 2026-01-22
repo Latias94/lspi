@@ -566,6 +566,11 @@ impl LspClient {
             Ok(v) => v,
             Err(_) => {
                 self.remove_pending(id).await;
+                // Best-effort cancellation to avoid wasting server work after the client timed out.
+                // See: https://microsoft.github.io/language-server-protocol/specifications/specification-current/#cancelRequest
+                let _ = self
+                    .send_notification("$/cancelRequest", &serde_json::json!({ "id": id }))
+                    .await;
                 return Err(anyhow!("LSP request timed out: {method}"));
             }
         };
@@ -1103,6 +1108,18 @@ mod server_request_tests {
             serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "exit",
+            })
+        );
+    }
+
+    #[test]
+    fn cancel_request_notification_includes_id_params() {
+        assert_eq!(
+            build_lsp_notification("$/cancelRequest", serde_json::json!({ "id": 42 })),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "$/cancelRequest",
+                "params": { "id": 42 }
             })
         );
     }
