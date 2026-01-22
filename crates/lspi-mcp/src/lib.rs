@@ -45,10 +45,18 @@ fn mcp_error_kind_name(code: i32) -> &'static str {
     }
 }
 
-fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
+fn lspi_error_kind_from_data(data: Option<&Value>) -> Option<&str> {
+    data.and_then(|d| d.get("lspi_error"))
+        .and_then(|e| e.get("kind"))
+        .and_then(|k| k.as_str())
+}
+
+fn error_next_steps(tool: &str, err: &McpError) -> Vec<Value> {
+    let message = err.message.as_ref();
+    let lspi_kind = lspi_error_kind_from_data(err.data.as_ref());
     let mut steps = Vec::new();
 
-    if message.contains("disabled in read-only mode") {
+    if lspi_kind == Some("read_only") || message.contains("disabled in read-only mode") {
         steps.push(json!({
             "kind": "config",
             "message": "This tool is disabled because lspi is running in read-only mode. Start lspi with `--read-write` or set `mcp.read_only=false` (config). If you used `--mode navigation` or `--context codex|navigation`, switch to `--mode refactor` or `--context full`."
@@ -87,21 +95,27 @@ fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
         }));
     }
 
-    if message.contains("no configured LSP server matches file extension") {
+    if lspi_kind == Some("no_server_for_extension")
+        || message.contains("no configured LSP server matches file extension")
+    {
         steps.push(json!({
             "kind": "config",
             "message": "Add/verify `servers[].extensions` for this language, or pass a `file_path` with the expected extension so routing can pick the correct server."
         }));
     }
 
-    if message.contains("server kind is not supported yet:") {
+    if lspi_kind == Some("unsupported_server_kind")
+        || message.contains("server kind is not supported yet:")
+    {
         steps.push(json!({
             "kind": "config",
             "message": "Use `kind = \"generic\"` for stdio JSON-RPC servers, or switch to a supported first-class kind (rust_analyzer, omnisharp, pyright, basedpyright)."
         }));
     }
 
-    if message.contains("missing command for generic server id=") {
+    if lspi_kind == Some("missing_generic_command")
+        || message.contains("missing command for generic server id=")
+    {
         steps.push(json!({
             "kind": "config",
             "message": "Set `servers[].command` (and usually `args=[\"--stdio\"]`) for `kind=\"generic\"`, or switch to a first-class kind if available."
@@ -113,7 +127,8 @@ fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
         }));
     }
 
-    if message.contains("pyright preflight failed") {
+    if lspi_kind == Some("pyright_preflight_failed") || message.contains("pyright preflight failed")
+    {
         steps.push(json!({
             "kind": "command",
             "command": "lspi doctor --workspace-root . --json",
@@ -176,7 +191,8 @@ fn error_next_steps(tool: &str, message: &str) -> Vec<Value> {
         }));
     }
 
-    if message.contains("outside allowed roots")
+    if lspi_kind == Some("outside_allowed_roots")
+        || message.contains("outside allowed roots")
         || message.contains("refusing to write outside allowed roots")
     {
         steps.push(json!({
@@ -209,6 +225,7 @@ fn mcp_error_to_call_tool_result(
     let code = err.code.0;
     let kind = mcp_error_kind_name(code);
     let message = err.message.to_string();
+    let next_steps = error_next_steps(tool, &err);
 
     let mut structured = structured_error(tool, None, input, kind, &message);
     if let Some(obj) = structured.as_object_mut() {
@@ -222,7 +239,6 @@ fn mcp_error_to_call_tool_result(
             }
         }
 
-        let next_steps = error_next_steps(tool, &message);
         if !next_steps.is_empty() {
             obj.insert("next_steps".to_string(), Value::Array(next_steps));
         }
@@ -504,8 +520,12 @@ mod mcp_error_mapping_tests {
 
     #[test]
     fn routing_extension_error_includes_introspection_next_steps() {
-        let err =
-            McpError::invalid_params("no configured LSP server matches file extension: rs", None);
+        let err = McpError::invalid_params(
+            "no configured LSP server matches file extension: rs",
+            Some(json!({
+                "lspi_error": { "kind": "no_server_for_extension", "extension": "rs" }
+            })),
+        );
         let result = mcp_error_to_call_tool_result("find_definition", None, err);
         assert_eq!(result.is_error, Some(true));
         let steps = structured_next_steps(&result);
@@ -515,7 +535,12 @@ mod mcp_error_mapping_tests {
 
     #[test]
     fn missing_generic_command_includes_doctor_hint() {
-        let err = McpError::invalid_params("missing command for generic server id=ts", None);
+        let err = McpError::invalid_params(
+            "missing command for generic server id=ts",
+            Some(json!({
+                "lspi_error": { "kind": "missing_generic_command", "server_id": "ts" }
+            })),
+        );
         let result = mcp_error_to_call_tool_result("hover_at", None, err);
         let steps = structured_next_steps(&result);
         assert!(steps.iter().any(|v| {
@@ -530,7 +555,9 @@ mod mcp_error_mapping_tests {
     fn outside_allowed_roots_includes_config_hint() {
         let err = McpError::invalid_params(
             "file_path is outside allowed roots (workspace_root=\"X\", file_path=\"Y\")",
-            None,
+            Some(json!({
+                "lspi_error": { "kind": "outside_allowed_roots" }
+            })),
         );
         let result = mcp_error_to_call_tool_result("rename_symbol", None, err);
         let steps = structured_next_steps(&result);
@@ -593,7 +620,13 @@ impl ServerHandler for LspiMcpServer {
                 "disabled in read-only mode",
             );
             if let Some(obj) = structured.as_object_mut() {
-                let next_steps = error_next_steps(tool, "disabled in read-only mode");
+                let err = McpError::invalid_params(
+                    "disabled in read-only mode",
+                    Some(json!({
+                        "lspi_error": { "kind": "read_only" }
+                    })),
+                );
+                let next_steps = error_next_steps(tool, &err);
                 if !next_steps.is_empty() {
                     obj.insert("next_steps".to_string(), Value::Array(next_steps));
                 }

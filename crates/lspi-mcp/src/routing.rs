@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rmcp::ErrorData as McpError;
+use serde_json::json;
 use tracing::info;
 
 use crate::routed_client::RoutedClient;
@@ -131,7 +132,12 @@ impl LspiMcpServer {
                 .unwrap_or("<none>");
             return Err(McpError::invalid_params(
                 format!("no configured LSP server matches file extension: {ext}"),
-                None,
+                Some(json!({
+                    "lspi_error": {
+                        "kind": "no_server_for_extension",
+                        "extension": ext
+                    }
+                })),
             ));
         };
 
@@ -179,7 +185,13 @@ impl LspiMcpServer {
                 "server kind is not supported yet: id={} kind={}",
                 server.id, server.kind
             ),
-            None,
+            Some(json!({
+                "lspi_error": {
+                    "kind": "unsupported_server_kind",
+                    "server_id": server.id,
+                    "server_kind": server.kind
+                }
+            })),
         ))
     }
 
@@ -436,7 +448,12 @@ impl LspiMcpServer {
             .ok_or_else(|| {
                 McpError::invalid_params(
                     format!("missing command for generic server id={}", server.id),
-                    None,
+                    Some(json!({
+                        "lspi_error": {
+                            "kind": "missing_generic_command",
+                            "server_id": server.id
+                        }
+                    })),
                 )
             })?
             .to_string();
@@ -567,7 +584,12 @@ impl LspiMcpServer {
         if let Err(err) = lspi_lsp::preflight_pyright(&command).await {
             return Err(McpError::invalid_params(
                 format!("pyright preflight failed for command={command}: {err:#}"),
-                None,
+                Some(json!({
+                    "lspi_error": {
+                        "kind": "pyright_preflight_failed",
+                        "command": command
+                    }
+                })),
             ));
         }
 

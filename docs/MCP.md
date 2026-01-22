@@ -16,7 +16,7 @@ Compared to grep-style workflows, the key value is **symbol-aware navigation** a
 
 - `content`: short human-readable fallback (for clients that ignore structured results)
 - `structuredContent`: canonical machine-readable JSON payload
-- `is_error`: set to `true` for tool-level failures
+- `isError`: set to `true` for tool-level failures
 
 ### `structuredContent` common fields
 
@@ -39,7 +39,7 @@ clients still get structured diagnostics.
 
 On error:
 
-- `is_error=true`
+- `isError=true`
 - `structuredContent.ok=false`
 - `structuredContent.error`:
   - `kind` (string): error category (e.g. `invalid_params`, `internal_error`, `read_only`)
@@ -71,6 +71,116 @@ Notes:
 - `kind="config"` steps explain what config knob to change (human action).
 - `kind="command"` steps suggest a CLI command to run (human action).
 - Clients SHOULD show `next_steps` prominently when `ok=false`.
+
+## Examples
+
+The following examples are derived from real `lspi` responses, with absolute paths redacted for portability.
+
+### Success example (`get_current_config`)
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Loaded config for workspace root <WORKSPACE_ROOT> (1 servers)."
+      }
+    ],
+    "structuredContent": {
+      "allowed_roots": ["<WORKSPACE_ROOT>"],
+      "input": { "include_env": false, "max_total_chars": 120000 },
+      "mcp": null,
+      "ok": true,
+      "read_only": true,
+      "schema_version": 1,
+      "server_count": 1,
+      "server_id": null,
+      "servers": [
+        {
+          "adapter": null,
+          "cwd": "<WORKSPACE_ROOT>",
+          "env": null,
+          "extensions": ["rs"],
+          "id": "rust-analyzer",
+          "initialize_timeout_ms": null,
+          "kind": "rust_analyzer",
+          "language_id": "rust",
+          "request_timeout_ms": null,
+          "request_timeout_overrides_ms": {},
+          "root_dir": "<WORKSPACE_ROOT>",
+          "workspace_folders": []
+        }
+      ],
+      "tool": "get_current_config",
+      "truncated": false,
+      "warnings": [],
+      "workspace_root": "<WORKSPACE_ROOT>"
+    },
+    "isError": false
+  }
+}
+```
+
+### Failure example (routing mismatch)
+
+When `file_path` does not match any configured server extension:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "content": [
+      { "type": "text", "text": "no configured LSP server matches file extension: md" }
+    ],
+    "structuredContent": {
+      "error": {
+        "code": -32602,
+        "data": { "lspi_error": { "extension": "md", "kind": "no_server_for_extension" } },
+        "kind": "invalid_params",
+        "message": "no configured LSP server matches file extension: md"
+      },
+      "input": { "file_path": "README.md", "symbol_name": "lspi" },
+      "mcp_error_code": -32602,
+      "message": "no configured LSP server matches file extension: md",
+      "next_steps": [
+        {
+          "arguments": {},
+          "kind": "tool",
+          "message": "Confirm the effective MCP config (workspace_root, allowed_roots, read_only, output caps).",
+          "tool": "get_current_config"
+        },
+        {
+          "arguments": {},
+          "kind": "tool",
+          "message": "Confirm configured servers, extensions, and routing metadata.",
+          "tool": "list_servers"
+        },
+        {
+          "arguments": {},
+          "kind": "tool",
+          "message": "Confirm server lifecycle status (running, last error, warmup).",
+          "tool": "get_server_status"
+        },
+        {
+          "kind": "config",
+          "message": "Add/verify `servers[].extensions` for this language, or pass a `file_path` with the expected extension so routing can pick the correct server."
+        }
+      ],
+      "ok": false,
+      "schema_version": 1,
+      "server_id": null,
+      "tool": "find_definition",
+      "truncated": false,
+      "warnings": []
+    },
+    "isError": true
+  }
+}
+```
 
 ## Output caps, truncation, and determinism
 
