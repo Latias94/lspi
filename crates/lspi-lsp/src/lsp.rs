@@ -561,6 +561,13 @@ impl LspClient {
             "processId": null,
             "rootUri": self.root_uri,
             "capabilities": {
+                "workspace": {
+                    "workspaceFolders": true,
+                    "configuration": true,
+                    "workspaceEdit": {
+                        "documentChanges": true
+                    }
+                },
                 "textDocument": {
                     "documentSymbol": {
                         "hierarchicalDocumentSymbolSupport": true
@@ -568,6 +575,9 @@ impl LspClient {
                     "callHierarchy": {
                         "dynamicRegistration": true
                     }
+                },
+                "window": {
+                    "workDoneProgress": true
                 },
                 "experimental": {
                     "serverStatusNotification": true
@@ -657,6 +667,25 @@ async fn handle_lsp_message(message: Value, ctx: &LspMessageContext) {
                 if let Err(err) = write_message_to(&ctx.stdin, &response).await {
                     warn!("failed to write response for server request {method}: {err:#}");
                 }
+            }
+            return;
+        }
+
+        if method == "tsserver/request" {
+            let Some(params) = message.get("params").and_then(|p| p.as_array()) else {
+                return;
+            };
+            let Some(id) = params.first().cloned() else {
+                return;
+            };
+
+            let response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "tsserver/response",
+                "params": [id, null]
+            });
+            if let Err(err) = write_message_to(&ctx.stdin, &response).await {
+                warn!("failed to write tsserver/response: {err:#}");
             }
             return;
         }
