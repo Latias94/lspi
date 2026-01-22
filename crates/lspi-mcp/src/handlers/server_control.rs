@@ -2,11 +2,11 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolRequestParam, CallToolResult, Content};
 use serde_json::{Value, json};
 
-use crate::{
-    LspiMcpServer, RestartServerArgs, StopServerArgs, is_generic_kind, is_omnisharp_kind,
-    is_pyright_kind, is_rust_analyzer_kind, parse_arguments, shutdown_generic_managed,
-    shutdown_omnisharp_managed, shutdown_rust_analyzer_managed,
+use crate::routing::{
+    is_generic_kind, is_omnisharp_kind, is_pyright_kind, is_rust_analyzer_kind,
+    shutdown_generic_managed, shutdown_omnisharp_managed, shutdown_rust_analyzer_managed,
 };
+use crate::{LspiMcpServer, RestartServerArgs, StopServerArgs, parse_arguments};
 
 impl LspiMcpServer {
     pub(crate) async fn restart_server(
