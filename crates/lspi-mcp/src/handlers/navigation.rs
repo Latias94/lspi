@@ -13,7 +13,7 @@ use crate::{
     HoverAtArgs, LocationWithSnippet, LspiMcpServer, ReferenceMatchOut, SearchWorkspaceSymbolsArgs,
     canonicalize_within, effective_max_total_chars, enforce_global_output_caps, hover_to_text,
     is_method_not_found_error, lsp_position_1based, lsp_range_1based, maybe_snippet_for_file_path,
-    parse_arguments,
+    parse_arguments, structured_error,
 };
 
 impl LspiMcpServer {
@@ -469,16 +469,39 @@ impl LspiMcpServer {
         }
 
         let Some(definitions) = definitions else {
+            let mut structured_content = structured_error(
+                "find_definition_at",
+                Some(&server_id),
+                Some(json!({
+                    "file_path": args.file_path,
+                    "line": args.line,
+                    "character": args.character,
+                    "max_results": max_results,
+                    "max_total_chars": max_total_chars,
+                    "include_snippet": include_snippet,
+                    "snippet_context_lines": snippet_context_lines,
+                    "max_snippet_chars": max_snippet_chars
+                })),
+                "lsp_error",
+                "definition lookup failed",
+            );
+            if let Some(obj) = structured_content.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("definition lookup failed".to_string()),
+                );
+                obj.insert(
+                    "cause".to_string(),
+                    last_err
+                        .map(|e| Value::String(e.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text(
                     "Definition lookup failed at the provided position.",
                 )],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "find_definition_at",
-                    "message": "definition lookup failed",
-                    "error": last_err.map(|e| e.to_string()),
-                })),
+                structured_content: Some(structured_content),
                 is_error: Some(true),
                 meta: None,
             });
@@ -662,16 +685,40 @@ impl LspiMcpServer {
         }
 
         let Some(references) = references else {
+            let mut structured_content = structured_error(
+                "find_references_at",
+                Some(&server_id),
+                Some(json!({
+                    "file_path": args.file_path,
+                    "line": args.line,
+                    "character": args.character,
+                    "include_declaration": include_declaration,
+                    "max_results": max_results,
+                    "max_total_chars": max_total_chars,
+                    "include_snippet": include_snippet,
+                    "snippet_context_lines": snippet_context_lines,
+                    "max_snippet_chars": max_snippet_chars
+                })),
+                "lsp_error",
+                "reference lookup failed",
+            );
+            if let Some(obj) = structured_content.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("reference lookup failed".to_string()),
+                );
+                obj.insert(
+                    "cause".to_string(),
+                    last_err
+                        .map(|e| Value::String(e.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text(
                     "Reference lookup failed at the provided position.",
                 )],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "find_references_at",
-                    "message": "reference lookup failed",
-                    "error": last_err.map(|e| e.to_string()),
-                })),
+                structured_content: Some(structured_content),
                 is_error: Some(true),
                 meta: None,
             });
@@ -855,16 +902,35 @@ impl LspiMcpServer {
         }
 
         let Some(hover_value) = hover_value else {
+            let mut structured_content = structured_error(
+                "hover_at",
+                Some(&server_id),
+                Some(json!({
+                    "file_path": args.file_path,
+                    "line": args.line,
+                    "character": args.character,
+                    "max_total_chars": max_total_chars
+                })),
+                "lsp_error",
+                "hover lookup failed",
+            );
+            if let Some(obj) = structured_content.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("hover lookup failed".to_string()),
+                );
+                obj.insert(
+                    "cause".to_string(),
+                    last_err
+                        .map(|e| Value::String(e.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text(
                     "Hover lookup failed at the provided position.",
                 )],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "hover_at",
-                    "message": "hover lookup failed",
-                    "error": last_err.map(|e| e.to_string()),
-                })),
+                structured_content: Some(structured_content),
                 is_error: Some(true),
                 meta: None,
             });
@@ -994,38 +1060,60 @@ impl LspiMcpServer {
                 .map(is_method_not_found_error)
                 .unwrap_or(false);
             if method_not_supported {
+                let mut structured_content = json!({
+                    "ok": true,
+                    "tool": "find_implementation_at",
+                    "server_id": server_id,
+                    "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
+                    "implementation_locations": 0,
+                    "implementations": [],
+                    "warnings": [{
+                        "kind": "method_not_supported",
+                        "message": "textDocument/implementation is not supported by this server."
+                    }],
+                    "truncated": false
+                });
+                crate::structured::ensure_common_fields(&mut structured_content);
                 return Ok(CallToolResult {
                     content: vec![Content::text(
                         "Implementation lookup is not supported by this language server.",
                     )],
-                    structured_content: Some(json!({
-                        "ok": true,
-                        "tool": "find_implementation_at",
-                        "server_id": server_id,
-                        "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
-                        "implementation_locations": 0,
-                        "implementations": [],
-                        "warnings": [{
-                            "kind": "method_not_supported",
-                            "message": "textDocument/implementation is not supported by this server."
-                        }],
-                        "truncated": false
-                    })),
+                    structured_content: Some(structured_content),
                     is_error: Some(false),
                     meta: None,
                 });
             }
 
+            let mut structured_content = structured_error(
+                "find_implementation_at",
+                Some(&server_id),
+                Some(json!({
+                    "file_path": args.file_path,
+                    "line": args.line,
+                    "character": args.character,
+                    "max_results": max_results,
+                    "max_total_chars": max_total_chars
+                })),
+                "lsp_error",
+                "implementation lookup failed",
+            );
+            if let Some(obj) = structured_content.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("implementation lookup failed".to_string()),
+                );
+                obj.insert(
+                    "cause".to_string(),
+                    last_err
+                        .map(|e| Value::String(e.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text(
                     "Implementation lookup failed at the provided position.",
                 )],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "find_implementation_at",
-                    "message": "implementation lookup failed",
-                    "error": last_err.map(|e| e.to_string()),
-                })),
+                structured_content: Some(structured_content),
                 is_error: Some(true),
                 meta: None,
             });
@@ -1160,38 +1248,60 @@ impl LspiMcpServer {
                 .map(is_method_not_found_error)
                 .unwrap_or(false);
             if method_not_supported {
+                let mut structured_content = json!({
+                    "ok": true,
+                    "tool": "find_type_definition_at",
+                    "server_id": server_id,
+                    "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
+                    "type_definition_locations": 0,
+                    "type_definitions": [],
+                    "warnings": [{
+                        "kind": "method_not_supported",
+                        "message": "textDocument/typeDefinition is not supported by this server."
+                    }],
+                    "truncated": false
+                });
+                crate::structured::ensure_common_fields(&mut structured_content);
                 return Ok(CallToolResult {
                     content: vec![Content::text(
                         "Type definition lookup is not supported by this language server.",
                     )],
-                    structured_content: Some(json!({
-                        "ok": true,
-                        "tool": "find_type_definition_at",
-                        "server_id": server_id,
-                        "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
-                        "type_definition_locations": 0,
-                        "type_definitions": [],
-                        "warnings": [{
-                            "kind": "method_not_supported",
-                            "message": "textDocument/typeDefinition is not supported by this server."
-                        }],
-                        "truncated": false
-                    })),
+                    structured_content: Some(structured_content),
                     is_error: Some(false),
                     meta: None,
                 });
             }
 
+            let mut structured_content = structured_error(
+                "find_type_definition_at",
+                Some(&server_id),
+                Some(json!({
+                    "file_path": args.file_path,
+                    "line": args.line,
+                    "character": args.character,
+                    "max_results": max_results,
+                    "max_total_chars": max_total_chars
+                })),
+                "lsp_error",
+                "type definition lookup failed",
+            );
+            if let Some(obj) = structured_content.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("type definition lookup failed".to_string()),
+                );
+                obj.insert(
+                    "cause".to_string(),
+                    last_err
+                        .map(|e| Value::String(e.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text(
                     "Type definition lookup failed at the provided position.",
                 )],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "find_type_definition_at",
-                    "message": "type definition lookup failed",
-                    "error": last_err.map(|e| e.to_string()),
-                })),
+                structured_content: Some(structured_content),
                 is_error: Some(true),
                 meta: None,
             });
@@ -1289,15 +1399,32 @@ impl LspiMcpServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         if candidates.is_empty() {
+            let mut structured_content = structured_error(
+                "find_incoming_calls",
+                Some(&server_id),
+                Some(json!({
+                    "file_path": args.file_path,
+                    "symbol_name": args.symbol_name,
+                    "symbol_kind": args.symbol_kind,
+                    "max_symbols": max_symbols,
+                    "max_results": max_results,
+                    "max_total_chars": max_total_chars,
+                    "include_snippet": include_snippet,
+                    "max_snippet_chars": max_snippet_chars
+                })),
+                "no_match",
+                "no matching symbols found",
+            );
+            if let Some(obj) = structured_content.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("no matching symbols found".to_string()),
+                );
+                obj.insert("candidates".to_string(), Value::Array(Vec::new()));
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text("No matching symbols found.")],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "find_incoming_calls",
-                    "server_id": server_id,
-                    "message": "no matching symbols found",
-                    "candidates": [],
-                })),
+                structured_content: Some(structured_content),
                 is_error: Some(true),
                 meta: None,
             });
@@ -1417,24 +1544,26 @@ impl LspiMcpServer {
             Ok(r) => r,
             Err(e) => {
                 if is_method_not_found_error(&e) {
+                    let mut structured_content = json!({
+                        "ok": true,
+                        "tool": "find_incoming_calls",
+                        "server_id": server_id,
+                        "input": { "file_path": args.file_path, "symbol_name": args.symbol_name, "symbol_kind": args.symbol_kind, "max_symbols": max_symbols, "max_results": max_results, "max_total_chars": max_total_chars },
+                        "target": null,
+                        "call_count": 0,
+                        "calls": [],
+                        "warnings": [{
+                            "kind": "method_not_supported",
+                            "message": "callHierarchy is not supported by this server."
+                        }],
+                        "truncated": false
+                    });
+                    crate::structured::ensure_common_fields(&mut structured_content);
                     return Ok(CallToolResult {
                         content: vec![Content::text(
                             "Call hierarchy is not supported by this language server.",
                         )],
-                        structured_content: Some(json!({
-                            "ok": true,
-                            "tool": "find_incoming_calls",
-                            "server_id": server_id,
-                            "input": { "file_path": args.file_path, "symbol_name": args.symbol_name, "symbol_kind": args.symbol_kind, "max_symbols": max_symbols, "max_results": max_results, "max_total_chars": max_total_chars },
-                            "target": null,
-                            "call_count": 0,
-                            "calls": [],
-                            "warnings": [{
-                                "kind": "method_not_supported",
-                                "message": "callHierarchy is not supported by this server."
-                            }],
-                            "truncated": false
-                        })),
+                        structured_content: Some(structured_content),
                         is_error: Some(false),
                         meta: None,
                     });
@@ -1558,15 +1687,32 @@ impl LspiMcpServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         if candidates.is_empty() {
+            let mut structured_content = structured_error(
+                "find_outgoing_calls",
+                Some(&server_id),
+                Some(json!({
+                    "file_path": args.file_path,
+                    "symbol_name": args.symbol_name,
+                    "symbol_kind": args.symbol_kind,
+                    "max_symbols": max_symbols,
+                    "max_results": max_results,
+                    "max_total_chars": max_total_chars,
+                    "include_snippet": include_snippet,
+                    "max_snippet_chars": max_snippet_chars
+                })),
+                "no_match",
+                "no matching symbols found",
+            );
+            if let Some(obj) = structured_content.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("no matching symbols found".to_string()),
+                );
+                obj.insert("candidates".to_string(), Value::Array(Vec::new()));
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text("No matching symbols found.")],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "find_outgoing_calls",
-                    "server_id": server_id,
-                    "message": "no matching symbols found",
-                    "candidates": [],
-                })),
+                structured_content: Some(structured_content),
                 is_error: Some(true),
                 meta: None,
             });
@@ -1686,24 +1832,26 @@ impl LspiMcpServer {
             Ok(r) => r,
             Err(e) => {
                 if is_method_not_found_error(&e) {
+                    let mut structured_content = json!({
+                        "ok": true,
+                        "tool": "find_outgoing_calls",
+                        "server_id": server_id,
+                        "input": { "file_path": args.file_path, "symbol_name": args.symbol_name, "symbol_kind": args.symbol_kind, "max_symbols": max_symbols, "max_results": max_results, "max_total_chars": max_total_chars },
+                        "target": null,
+                        "call_count": 0,
+                        "calls": [],
+                        "warnings": [{
+                            "kind": "method_not_supported",
+                            "message": "callHierarchy is not supported by this server."
+                        }],
+                        "truncated": false
+                    });
+                    crate::structured::ensure_common_fields(&mut structured_content);
                     return Ok(CallToolResult {
                         content: vec![Content::text(
                             "Call hierarchy is not supported by this language server.",
                         )],
-                        structured_content: Some(json!({
-                            "ok": true,
-                            "tool": "find_outgoing_calls",
-                            "server_id": server_id,
-                            "input": { "file_path": args.file_path, "symbol_name": args.symbol_name, "symbol_kind": args.symbol_kind, "max_symbols": max_symbols, "max_results": max_results, "max_total_chars": max_total_chars },
-                            "target": null,
-                            "call_count": 0,
-                            "calls": [],
-                            "warnings": [{
-                                "kind": "method_not_supported",
-                                "message": "callHierarchy is not supported by this server."
-                            }],
-                            "truncated": false
-                        })),
+                        structured_content: Some(structured_content),
                         is_error: Some(false),
                         meta: None,
                     });
@@ -1864,39 +2012,61 @@ impl LspiMcpServer {
                 .map(is_method_not_found_error)
                 .unwrap_or(false);
             if method_not_supported {
+                let mut structured_content = json!({
+                    "ok": true,
+                    "tool": "find_incoming_calls_at",
+                    "server_id": server_id,
+                    "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
+                    "target": null,
+                    "call_count": 0,
+                    "calls": [],
+                    "warnings": [{
+                        "kind": "method_not_supported",
+                        "message": "callHierarchy is not supported by this server."
+                    }],
+                    "truncated": false
+                });
+                crate::structured::ensure_common_fields(&mut structured_content);
                 return Ok(CallToolResult {
                     content: vec![Content::text(
                         "Call hierarchy is not supported by this language server.",
                     )],
-                    structured_content: Some(json!({
-                        "ok": true,
-                        "tool": "find_incoming_calls_at",
-                        "server_id": server_id,
-                        "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
-                        "target": null,
-                        "call_count": 0,
-                        "calls": [],
-                        "warnings": [{
-                            "kind": "method_not_supported",
-                            "message": "callHierarchy is not supported by this server."
-                        }],
-                        "truncated": false
-                    })),
+                    structured_content: Some(structured_content),
                     is_error: Some(false),
                     meta: None,
                 });
             }
 
+            let mut structured_content = structured_error(
+                "find_incoming_calls_at",
+                Some(&server_id),
+                Some(json!({
+                    "file_path": args.file_path,
+                    "line": args.line,
+                    "character": args.character,
+                    "max_results": max_results,
+                    "max_total_chars": max_total_chars
+                })),
+                "lsp_error",
+                "call hierarchy lookup failed",
+            );
+            if let Some(obj) = structured_content.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("call hierarchy lookup failed".to_string()),
+                );
+                obj.insert(
+                    "cause".to_string(),
+                    last_err
+                        .map(|e| Value::String(e.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text(
                     "Call hierarchy lookup failed at the provided position.",
                 )],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "find_incoming_calls_at",
-                    "message": "call hierarchy lookup failed",
-                    "error": last_err.map(|e| e.to_string()),
-                })),
+                structured_content: Some(structured_content),
                 is_error: Some(true),
                 meta: None,
             });
@@ -2054,39 +2224,61 @@ impl LspiMcpServer {
                 .map(is_method_not_found_error)
                 .unwrap_or(false);
             if method_not_supported {
+                let mut structured_content = json!({
+                    "ok": true,
+                    "tool": "find_outgoing_calls_at",
+                    "server_id": server_id,
+                    "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
+                    "target": null,
+                    "call_count": 0,
+                    "calls": [],
+                    "warnings": [{
+                        "kind": "method_not_supported",
+                        "message": "callHierarchy is not supported by this server."
+                    }],
+                    "truncated": false
+                });
+                crate::structured::ensure_common_fields(&mut structured_content);
                 return Ok(CallToolResult {
                     content: vec![Content::text(
                         "Call hierarchy is not supported by this language server.",
                     )],
-                    structured_content: Some(json!({
-                        "ok": true,
-                        "tool": "find_outgoing_calls_at",
-                        "server_id": server_id,
-                        "input": { "file_path": args.file_path, "line": args.line, "character": args.character, "max_results": max_results, "max_total_chars": max_total_chars },
-                        "target": null,
-                        "call_count": 0,
-                        "calls": [],
-                        "warnings": [{
-                            "kind": "method_not_supported",
-                            "message": "callHierarchy is not supported by this server."
-                        }],
-                        "truncated": false
-                    })),
+                    structured_content: Some(structured_content),
                     is_error: Some(false),
                     meta: None,
                 });
             }
 
+            let mut structured_content = structured_error(
+                "find_outgoing_calls_at",
+                Some(&server_id),
+                Some(json!({
+                    "file_path": args.file_path,
+                    "line": args.line,
+                    "character": args.character,
+                    "max_results": max_results,
+                    "max_total_chars": max_total_chars
+                })),
+                "lsp_error",
+                "call hierarchy lookup failed",
+            );
+            if let Some(obj) = structured_content.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("call hierarchy lookup failed".to_string()),
+                );
+                obj.insert(
+                    "cause".to_string(),
+                    last_err
+                        .map(|e| Value::String(e.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text(
                     "Call hierarchy lookup failed at the provided position.",
                 )],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "find_outgoing_calls_at",
-                    "message": "call hierarchy lookup failed",
-                    "error": last_err.map(|e| e.to_string()),
-                })),
+                structured_content: Some(structured_content),
                 is_error: Some(true),
                 meta: None,
             });

@@ -25,11 +25,13 @@ mod handlers;
 mod output;
 mod routed_client;
 mod routing;
+mod structured;
 mod tool_schemas;
 mod tools;
 mod workspace_edit;
 
 use output::{effective_max_total_chars, enforce_global_output_caps};
+use structured::{structured_error, structured_ok};
 
 pub async fn run_stdio() -> Result<()> {
     run_stdio_with_options(McpOptions::default()).await
@@ -200,15 +202,25 @@ impl ServerHandler for LspiMcpServer {
             )
         {
             let tool = request.name.as_ref();
+            let input = request.arguments.clone().map(Value::Object);
+            let mut structured = structured::structured_error(
+                tool,
+                None,
+                input,
+                "read_only",
+                "disabled in read-only mode",
+            );
+            if let Some(obj) = structured.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("disabled in read-only mode".to_string()),
+                );
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text(format!(
                     "Tool '{tool}' is disabled in read-only mode."
                 ))],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": tool,
-                    "message": "disabled in read-only mode",
-                })),
+                structured_content: Some(structured),
                 is_error: Some(true),
                 meta: None,
             });
@@ -234,14 +246,27 @@ impl ServerHandler for LspiMcpServer {
             "restart_server" => self.restart_server(request).await,
             "stop_server" => self.stop_server(request).await,
             other => Ok(CallToolResult {
+                // Keep a short text fallback for clients that ignore structuredContent.
                 content: vec![Content::text(format!(
                     "Tool '{other}' is not implemented yet."
                 ))],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": other,
-                    "message": "not implemented yet"
-                })),
+                structured_content: Some({
+                    let input = request.arguments.clone().map(Value::Object);
+                    let mut structured = structured::structured_error(
+                        other,
+                        None,
+                        input,
+                        "not_implemented",
+                        "not implemented yet",
+                    );
+                    if let Some(obj) = structured.as_object_mut() {
+                        obj.insert(
+                            "message".to_string(),
+                            Value::String("not implemented yet".to_string()),
+                        );
+                    }
+                    structured
+                }),
                 is_error: Some(true),
                 meta: None,
             }),

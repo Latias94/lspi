@@ -47,6 +47,8 @@ pub(crate) fn enforce_global_output_caps(
     include_snippet: bool,
     payload: &mut Value,
 ) {
+    crate::structured::ensure_common_fields(payload);
+
     let Some(tool) = payload
         .get("tool")
         .and_then(|v| v.as_str())

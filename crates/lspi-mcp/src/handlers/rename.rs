@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::{
     LspiMcpServer, RenameSymbolArgs, RenameSymbolStrictArgs, canonicalize_within,
-    maybe_snippet_for_file_path, parse_arguments, workspace_edit,
+    maybe_snippet_for_file_path, parse_arguments, structured_error, structured_ok, workspace_edit,
 };
 
 impl LspiMcpServer {
@@ -40,15 +40,30 @@ impl LspiMcpServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         if candidates.is_empty() {
+            let input = json!({
+                "file_path": args.file_path,
+                "symbol_name": args.symbol_name,
+                "symbol_kind": args.symbol_kind,
+                "new_name": args.new_name,
+                "dry_run": dry_run
+            });
+            let mut structured = structured_error(
+                "rename_symbol",
+                Some(&server_id),
+                Some(input),
+                "no_match",
+                "no matching symbols found",
+            );
+            if let Some(obj) = structured.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("no matching symbols found".to_string()),
+                );
+                obj.insert("candidates".to_string(), Value::Array(Vec::new()));
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text("No matching symbols found.")],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "rename_symbol",
-                    "server_id": server_id,
-                    "message": "no matching symbols found",
-                    "candidates": [],
-                })),
+                structured_content: Some(structured),
                 is_error: Some(true),
                 meta: None,
             });
@@ -128,15 +143,26 @@ impl LspiMcpServer {
                     "Multiple symbols match '{}'. Use rename_symbol_strict with one of the returned positions.",
                     args.symbol_name
                 ))],
-                structured_content: Some(json!({
-                    "ok": true,
-                    "tool": "rename_symbol",
-                    "server_id": server_id,
-                    "needs_disambiguation": true,
-                    "candidates": candidates_out,
-                    "dry_run": true,
-                    "warnings": warnings
-                })),
+                structured_content: Some({
+                    let mut structured = structured_ok(
+                        "rename_symbol",
+                        Some(&server_id),
+                        json!({
+                            "file_path": args.file_path,
+                            "symbol_name": args.symbol_name,
+                            "symbol_kind": args.symbol_kind,
+                            "new_name": args.new_name,
+                            "dry_run": true
+                        }),
+                    );
+                    if let Some(obj) = structured.as_object_mut() {
+                        obj.insert("needs_disambiguation".to_string(), Value::Bool(true));
+                        obj.insert("candidates".to_string(), Value::Array(candidates_out));
+                        obj.insert("dry_run".to_string(), Value::Bool(true));
+                        obj.insert("warnings".to_string(), Value::Array(warnings));
+                    }
+                    structured
+                }),
                 is_error: Some(false),
                 meta: None,
             });
@@ -173,17 +199,39 @@ impl LspiMcpServer {
                     "Applied rename: {} files modified.",
                     apply_result.files_modified.len()
                 ))],
-                structured_content: Some(json!({
-                    "ok": true,
-                    "tool": "rename_symbol",
-                    "server_id": server_id,
-                    "dry_run": false,
-                    "symbol": candidate,
-                    "new_name": args.new_name,
-                    "edit": preview,
-                    "apply": apply_result,
-                    "warnings": []
-                })),
+                structured_content: Some({
+                    let mut structured = structured_ok(
+                        "rename_symbol",
+                        Some(&server_id),
+                        json!({
+                            "file_path": args.file_path,
+                            "symbol_name": args.symbol_name,
+                            "symbol_kind": args.symbol_kind,
+                            "new_name": args.new_name,
+                            "dry_run": false,
+                            "expected_before_sha256": args.expected_before_sha256,
+                            "create_backups": args.create_backups,
+                            "backup_suffix": args.backup_suffix
+                        }),
+                    );
+                    if let Some(obj) = structured.as_object_mut() {
+                        obj.insert("dry_run".to_string(), Value::Bool(false));
+                        obj.insert(
+                            "symbol".to_string(),
+                            serde_json::to_value(candidate).unwrap_or(Value::Null),
+                        );
+                        obj.insert("new_name".to_string(), Value::String(args.new_name));
+                        obj.insert(
+                            "edit".to_string(),
+                            serde_json::to_value(preview).unwrap_or(Value::Null),
+                        );
+                        obj.insert(
+                            "apply".to_string(),
+                            serde_json::to_value(apply_result).unwrap_or(Value::Null),
+                        );
+                    }
+                    structured
+                }),
                 is_error: Some(false),
                 meta: None,
             });
@@ -194,16 +242,35 @@ impl LspiMcpServer {
                 "Preview rename: {} files affected.",
                 preview.files.len()
             ))],
-            structured_content: Some(json!({
-                "ok": true,
-                "tool": "rename_symbol",
-                "server_id": server_id,
-                "dry_run": true,
-                "symbol": candidate,
-                "new_name": args.new_name,
-                "edit": preview,
-                "warnings": []
-            })),
+            structured_content: Some({
+                let mut structured = structured_ok(
+                    "rename_symbol",
+                    Some(&server_id),
+                    json!({
+                        "file_path": args.file_path,
+                        "symbol_name": args.symbol_name,
+                        "symbol_kind": args.symbol_kind,
+                        "new_name": args.new_name,
+                        "dry_run": true,
+                        "expected_before_sha256": args.expected_before_sha256,
+                        "create_backups": args.create_backups,
+                        "backup_suffix": args.backup_suffix
+                    }),
+                );
+                if let Some(obj) = structured.as_object_mut() {
+                    obj.insert("dry_run".to_string(), Value::Bool(true));
+                    obj.insert(
+                        "symbol".to_string(),
+                        serde_json::to_value(candidate).unwrap_or(Value::Null),
+                    );
+                    obj.insert("new_name".to_string(), Value::String(args.new_name));
+                    obj.insert(
+                        "edit".to_string(),
+                        serde_json::to_value(preview).unwrap_or(Value::Null),
+                    );
+                }
+                structured
+            }),
             is_error: Some(false),
             meta: None,
         })
@@ -275,15 +342,35 @@ impl LspiMcpServer {
         }
 
         let Some(changes) = changes else {
+            let input = json!({
+                "file_path": args.file_path,
+                "line": args.line,
+                "character": args.character,
+                "new_name": args.new_name,
+                "dry_run": dry_run
+            });
+            let mut structured = structured_error(
+                "rename_symbol_strict",
+                Some(&server_id),
+                Some(input),
+                "rename_failed",
+                "rename failed",
+            );
+            if let Some(obj) = structured.as_object_mut() {
+                obj.insert(
+                    "message".to_string(),
+                    Value::String("rename failed".to_string()),
+                );
+                obj.insert(
+                    "cause".to_string(),
+                    last_err
+                        .map(|e| Value::String(e.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text("Rename failed at the provided position.")],
-                structured_content: Some(json!({
-                    "ok": false,
-                    "tool": "rename_symbol_strict",
-                    "server_id": server_id,
-                    "message": "rename failed",
-                    "error": last_err.map(|e| e.to_string()),
-                })),
+                structured_content: Some(structured),
                 is_error: Some(true),
                 meta: None,
             });
@@ -294,7 +381,7 @@ impl LspiMcpServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         let mut warnings = Vec::<Value>::new();
-        if let Some(used) = used_pos
+        if let Some(used) = used_pos.as_ref()
             && (used.line != best_guess.line || used.character != best_guess.character)
         {
             warnings.push(json!({
@@ -321,17 +408,43 @@ impl LspiMcpServer {
                     "Applied rename: {} files modified.",
                     apply_result.files_modified.len()
                 ))],
-                structured_content: Some(json!({
-                    "ok": true,
-                    "tool": "rename_symbol_strict",
-                    "server_id": server_id,
-                    "dry_run": false,
-                    "input_position": { "line": args.line, "character": args.character },
-                    "new_name": args.new_name,
-                    "edit": preview,
-                    "apply": apply_result,
-                    "warnings": warnings
-                })),
+                structured_content: Some({
+                    let mut structured = structured_ok(
+                        "rename_symbol_strict",
+                        Some(&server_id),
+                        json!({
+                            "file_path": args.file_path,
+                            "line": args.line,
+                            "character": args.character,
+                            "new_name": args.new_name.clone(),
+                            "dry_run": false,
+                            "expected_before_sha256": args.expected_before_sha256,
+                            "create_backups": args.create_backups,
+                            "backup_suffix": args.backup_suffix
+                        }),
+                    );
+                    if let Some(obj) = structured.as_object_mut() {
+                        obj.insert("dry_run".to_string(), Value::Bool(false));
+                        obj.insert(
+                            "used_lsp_position".to_string(),
+                            used_pos
+                                .as_ref()
+                                .map(|p| json!({"line": p.line, "character": p.character}))
+                                .unwrap_or(Value::Null),
+                        );
+                        obj.insert("new_name".to_string(), Value::String(args.new_name.clone()));
+                        obj.insert(
+                            "edit".to_string(),
+                            serde_json::to_value(preview).unwrap_or(Value::Null),
+                        );
+                        obj.insert(
+                            "apply".to_string(),
+                            serde_json::to_value(apply_result).unwrap_or(Value::Null),
+                        );
+                        obj.insert("warnings".to_string(), Value::Array(warnings));
+                    }
+                    structured
+                }),
                 is_error: Some(false),
                 meta: None,
             });
@@ -342,16 +455,39 @@ impl LspiMcpServer {
                 "Preview rename: {} files affected.",
                 preview.files.len()
             ))],
-            structured_content: Some(json!({
-                "ok": true,
-                "tool": "rename_symbol_strict",
-                "server_id": server_id,
-                "dry_run": true,
-                "input_position": { "line": args.line, "character": args.character },
-                "new_name": args.new_name,
-                "edit": preview,
-                "warnings": warnings
-            })),
+            structured_content: Some({
+                let mut structured = structured_ok(
+                    "rename_symbol_strict",
+                    Some(&server_id),
+                    json!({
+                        "file_path": args.file_path,
+                        "line": args.line,
+                        "character": args.character,
+                        "new_name": args.new_name.clone(),
+                        "dry_run": true,
+                        "expected_before_sha256": args.expected_before_sha256,
+                        "create_backups": args.create_backups,
+                        "backup_suffix": args.backup_suffix
+                    }),
+                );
+                if let Some(obj) = structured.as_object_mut() {
+                    obj.insert("dry_run".to_string(), Value::Bool(true));
+                    obj.insert(
+                        "used_lsp_position".to_string(),
+                        used_pos
+                            .as_ref()
+                            .map(|p| json!({"line": p.line, "character": p.character}))
+                            .unwrap_or(Value::Null),
+                    );
+                    obj.insert("new_name".to_string(), Value::String(args.new_name));
+                    obj.insert(
+                        "edit".to_string(),
+                        serde_json::to_value(preview).unwrap_or(Value::Null),
+                    );
+                    obj.insert("warnings".to_string(), Value::Array(warnings));
+                }
+                structured
+            }),
             is_error: Some(false),
             meta: None,
         })

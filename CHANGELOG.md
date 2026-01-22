@@ -25,6 +25,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 - Repo hygiene: ignore IntelliJ project files (`.idea/`, `*.iml`).
 - Docs: improve MCP-first documentation (README FAQ/troubleshooting, minimal config example, and upstream inspirations).
 - MCP: when multiple servers are configured, `search_workspace_symbols` returns a disambiguation payload (instead of a hard error) so clients can pick a server by providing `file_path`.
+- MCP: standardize `structuredContent` tool responses with a versioned `schema_version` field and consistent common fields (`input`/`warnings`/`truncated`).
 
 ### Added
 

@@ -21,6 +21,7 @@ We also need to keep tool outputs bounded to avoid token blowups, especially for
 - `lspi` tool results MUST include:
   - `structuredContent` as the canonical machine-readable payload (JSON)
   - `content` as a short text summary and fallback for clients that ignore `structuredContent`
+- `structuredContent` MUST include `schema_version` so clients can evolve with the response shape.
 - The `structuredContent` payload MUST be size-bounded:
   - tools accept `max_results` (where applicable)
   - snippets are optional and strictly limited by configured caps
@@ -31,4 +32,3 @@ We also need to keep tool outputs bounded to avoid token blowups, especially for
 - Codex and other clients that ingest `structuredContent` get deterministic, parseable results.
 - Compatibility remains good for clients that only show text.
 - We must design and version the JSON payload shape and enforce output caps.
-

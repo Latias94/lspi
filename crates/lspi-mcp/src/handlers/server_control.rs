@@ -6,7 +6,7 @@ use crate::routing::{
     is_generic_kind, is_omnisharp_kind, is_pyright_kind, is_rust_analyzer_kind,
     shutdown_generic_managed, shutdown_omnisharp_managed, shutdown_rust_analyzer_managed,
 };
-use crate::{LspiMcpServer, RestartServerArgs, StopServerArgs, parse_arguments};
+use crate::{LspiMcpServer, RestartServerArgs, StopServerArgs, parse_arguments, structured_ok};
 
 impl LspiMcpServer {
     pub(crate) async fn restart_server(
@@ -46,15 +46,21 @@ impl LspiMcpServer {
             };
 
         if target_server_ids.is_empty() {
+            let mut structured = structured_ok(
+                "restart_server",
+                None,
+                json!({
+                    "extensions": args.extensions,
+                    "requested_extensions": requested_extensions
+                }),
+            );
+            if let Some(obj) = structured.as_object_mut() {
+                obj.insert("restarted".to_string(), Value::Array(Vec::new()));
+                obj.insert("warnings".to_string(), Value::Array(Vec::new()));
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text("No matching servers to restart.")],
-                structured_content: Some(json!({
-                    "ok": true,
-                    "tool": "restart_server",
-                    "requested_extensions": requested_extensions,
-                    "restarted": [],
-                    "warnings": []
-                })),
+                structured_content: Some(structured),
                 is_error: Some(false),
                 meta: None,
             });
@@ -171,16 +177,30 @@ impl LspiMcpServer {
         let ok = busy.is_empty();
         let is_error = restarted.is_empty() && !busy.is_empty();
 
+        let mut structured = structured_ok(
+            "restart_server",
+            None,
+            json!({
+                "extensions": args.extensions,
+                "requested_extensions": requested_extensions
+            }),
+        );
+        if let Some(obj) = structured.as_object_mut() {
+            obj.insert("ok".to_string(), Value::Bool(ok));
+            obj.insert(
+                "restarted".to_string(),
+                serde_json::to_value(restarted).unwrap_or(Value::Null),
+            );
+            obj.insert(
+                "busy".to_string(),
+                serde_json::to_value(busy).unwrap_or(Value::Null),
+            );
+            obj.insert("warnings".to_string(), Value::Array(warnings));
+        }
+
         Ok(CallToolResult {
             content: vec![Content::text("Restarted servers.")],
-            structured_content: Some(json!({
-                "ok": ok,
-                "tool": "restart_server",
-                "requested_extensions": requested_extensions,
-                "restarted": restarted,
-                "busy": busy,
-                "warnings": warnings
-            })),
+            structured_content: Some(structured),
             is_error: Some(is_error),
             meta: None,
         })
@@ -223,15 +243,21 @@ impl LspiMcpServer {
             };
 
         if target_server_ids.is_empty() {
+            let mut structured = structured_ok(
+                "stop_server",
+                None,
+                json!({
+                    "extensions": args.extensions,
+                    "requested_extensions": requested_extensions
+                }),
+            );
+            if let Some(obj) = structured.as_object_mut() {
+                obj.insert("stopped".to_string(), Value::Array(Vec::new()));
+                obj.insert("warnings".to_string(), Value::Array(Vec::new()));
+            }
             return Ok(CallToolResult {
                 content: vec![Content::text("No matching servers to stop.")],
-                structured_content: Some(json!({
-                    "ok": true,
-                    "tool": "stop_server",
-                    "requested_extensions": requested_extensions,
-                    "stopped": [],
-                    "warnings": []
-                })),
+                structured_content: Some(structured),
                 is_error: Some(false),
                 meta: None,
             });
@@ -348,16 +374,30 @@ impl LspiMcpServer {
         let ok = busy.is_empty();
         let is_error = stopped.is_empty() && !busy.is_empty();
 
+        let mut structured = structured_ok(
+            "stop_server",
+            None,
+            json!({
+                "extensions": args.extensions,
+                "requested_extensions": requested_extensions
+            }),
+        );
+        if let Some(obj) = structured.as_object_mut() {
+            obj.insert("ok".to_string(), Value::Bool(ok));
+            obj.insert(
+                "stopped".to_string(),
+                serde_json::to_value(stopped).unwrap_or(Value::Null),
+            );
+            obj.insert(
+                "busy".to_string(),
+                serde_json::to_value(busy).unwrap_or(Value::Null),
+            );
+            obj.insert("warnings".to_string(), Value::Array(warnings));
+        }
+
         Ok(CallToolResult {
             content: vec![Content::text("Stopped servers.")],
-            structured_content: Some(json!({
-                "ok": ok,
-                "tool": "stop_server",
-                "requested_extensions": requested_extensions,
-                "stopped": stopped,
-                "busy": busy,
-                "warnings": warnings
-            })),
+            structured_content: Some(structured),
             is_error: Some(is_error),
             meta: None,
         })

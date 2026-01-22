@@ -79,6 +79,7 @@ MCP tool call responses support both `content` (human-readable blocks) and `stru
 - Treat `structuredContent` as the canonical payload for tool results (JSON).
 - Include a short `content` text summary as a compatibility fallback.
 - Enforce strict output caps (max results, max snippet size) to avoid large tool outputs.
+- Include a `schema_version` field so clients can evolve with the response shape.
 
 See ADR 0007.
 
