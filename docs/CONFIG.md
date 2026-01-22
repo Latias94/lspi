@@ -101,6 +101,7 @@ extensions = ["ts", "tsx", "js", "jsx"]
 language_id = "typescript"
 command = "typescript-language-server"
 args = ["--stdio"]
+adapter = "tsserver"
 initialize_timeout_ms = 10000
 request_timeout_ms = 30000
 ```
@@ -110,6 +111,26 @@ Notes:
 - `language_id` controls the `textDocument/didOpen` languageId. If omitted, `lspi` guesses from the first extension.
 - For `kind = "generic"`, `command` is required (no auto-resolve).
 - Some servers require a specific working directory or environment. Use `cwd` and `[servers.env]` when needed.
+- For TypeScript/Vue tooling, `adapter = "tsserver"` applies a small compatibility layer and sensible default per-method timeouts (you can override via `request_timeout_overrides_ms`).
+
+### Generic LSP example (Vue / Volar)
+
+```toml
+[[servers]]
+id = "vue"
+kind = "generic"
+extensions = ["vue", "ts", "tsx", "js", "jsx"]
+language_id = "vue"
+command = "vue-language-server"
+args = ["--stdio"]
+adapter = "tsserver"
+initialize_timeout_ms = 10000
+request_timeout_ms = 45000
+```
+
+Notes:
+
+- Vue tooling often relies on an editor-provided tsserver bridge (`tsserver/request` / `tsserver/response`). `lspi` does not embed tsserver, so the adapter responds with `null` to avoid server hangs and let it fall back.
 
 ### Generic LSP example (Go / gopls)
 

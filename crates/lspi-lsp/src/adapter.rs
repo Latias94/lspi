@@ -78,17 +78,23 @@ fn tsserver_request_result(method: &str, params: Option<&Value>) -> Option<Value
     }
 
     let Some(arr) = params.and_then(|p| p.as_array()) else {
-        return Some(json!([0, {}]));
+        return Some(json!([0, null]));
     };
     let id = arr.first().cloned().unwrap_or(Value::Null);
     let request_type = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
-    if request_type == "_vue:projectInfo" {
-        return Some(json!([
-            id,
-            { "configFiles": [], "sourceFiles": [] }
-        ]));
+
+    // Vue language tooling uses a custom tsserver bridge where the LSP client is expected to forward
+    // requests to an editor/tsserver integration (e.g. VSCode's `typescript.tsserverRequest`) and then
+    // respond via `tsserver/response`. In lspi we don't embed tsserver, so we return `null` (similar to
+    // how VSCode responds with `undefined` on failure) to avoid hangs and let the server fall back.
+    //
+    // Returning `{}` is unsafe for some request types (notably `_vue:projectInfo`) because it is truthy
+    // and may be treated as a valid response body.
+    if request_type.starts_with("_vue:") {
+        return Some(json!([id, null]));
     }
-    Some(json!([id, {}]))
+
+    Some(json!([id, null]))
 }
 
 fn tsserver_notification_response(method: &str, params: Option<&Value>) -> Option<Value> {
@@ -154,7 +160,7 @@ mod tests {
         let out = LspAdapter::TsServerProtocol
             .server_request_result("tsserver/request", Some(&params), &[], &HashMap::new())
             .unwrap();
-        assert_eq!(out, json!([42, { "configFiles": [], "sourceFiles": [] }]));
+        assert_eq!(out, json!([42, null]));
     }
 
     #[test]

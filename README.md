@@ -77,6 +77,7 @@ For more details, see `docs/CODEX.md`.
 - TypeScript/Vue returns empty/odd results:
   - Configure `servers[].workspace_configuration` and/or tune `initialize_options` / `client_capabilities`.
   - Consider `servers[].adapter = "tsserver"` when using TypeScript/Vue tooling.
+  - If calls time out on large workspaces, increase `request_timeout_ms` or set `request_timeout_overrides_ms` for slow methods (definition/references/rename/documentSymbol).
 
 ## Language server support
 

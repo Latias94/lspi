@@ -236,8 +236,17 @@ impl LspiMcpServer {
             .request_timeout_ms
             .map(Duration::from_millis)
             .unwrap_or_else(|| Duration::from_secs(30));
-        let request_timeout_overrides =
-            request_timeout_overrides_to_durations(&server.request_timeout_overrides_ms);
+
+        let adapter = server
+            .adapter
+            .as_deref()
+            .and_then(lspi_lsp::adapter_from_name)
+            .or_else(|| lspi_lsp::adapter_from_command(&command))
+            .unwrap_or_default();
+
+        let mut overrides_ms = adapter_default_request_timeout_overrides_ms(&adapter);
+        overrides_ms.extend(server.request_timeout_overrides_ms.clone());
+        let request_timeout_overrides = request_timeout_overrides_to_durations(&overrides_ms);
         let warmup_timeout = server
             .warmup_timeout_ms
             .map(Duration::from_millis)
@@ -446,8 +455,17 @@ impl LspiMcpServer {
             .request_timeout_ms
             .map(Duration::from_millis)
             .unwrap_or_else(|| Duration::from_secs(30));
-        let request_timeout_overrides =
-            request_timeout_overrides_to_durations(&server.request_timeout_overrides_ms);
+
+        let adapter = server
+            .adapter
+            .as_deref()
+            .and_then(lspi_lsp::adapter_from_name)
+            .or_else(|| lspi_lsp::adapter_from_command(&command))
+            .unwrap_or_default();
+
+        let mut overrides_ms = adapter_default_request_timeout_overrides_ms(&adapter);
+        overrides_ms.extend(server.request_timeout_overrides_ms.clone());
+        let request_timeout_overrides = request_timeout_overrides_to_durations(&overrides_ms);
 
         let warmup_delay = server
             .warmup_timeout_ms
@@ -459,13 +477,6 @@ impl LspiMcpServer {
             .clone()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| guess_language_id_from_extensions(&server.extensions));
-
-        let adapter = server
-            .adapter
-            .as_deref()
-            .and_then(lspi_lsp::adapter_from_name)
-            .or_else(|| lspi_lsp::adapter_from_command(&command))
-            .unwrap_or_default();
 
         let client = lspi_lsp::GenericLspClient::start(lspi_lsp::GenericLspClientOptions {
             command,
@@ -673,6 +684,7 @@ fn guess_language_id_from_extensions(extensions: &[String]) -> String {
         "tsx" => "typescriptreact",
         "js" => "javascript",
         "jsx" => "javascriptreact",
+        "vue" => "vue",
         "py" => "python",
         "go" => "go",
         "c" => "c",
@@ -694,6 +706,31 @@ fn pyright_default_request_timeout_overrides_ms() -> std::collections::HashMap<S
         ("textDocument/references", 60_000),
         ("textDocument/rename", 60_000),
         ("textDocument/documentSymbol", 45_000),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect()
+}
+
+fn adapter_default_request_timeout_overrides_ms(
+    adapter: &lspi_lsp::LspAdapter,
+) -> std::collections::HashMap<String, u64> {
+    match adapter {
+        lspi_lsp::LspAdapter::TsServerProtocol => tsserver_default_request_timeout_overrides_ms(),
+        _ => std::collections::HashMap::new(),
+    }
+}
+
+fn tsserver_default_request_timeout_overrides_ms() -> std::collections::HashMap<String, u64> {
+    // TypeScript / Vue language servers can be slow on workspace-wide operations.
+    // Provide sensible defaults similar to cclsp/serena.
+    [
+        ("textDocument/documentSymbol", 60_000),
+        ("textDocument/definition", 45_000),
+        ("textDocument/references", 45_000),
+        ("textDocument/rename", 45_000),
+        ("textDocument/typeDefinition", 45_000),
+        ("textDocument/implementation", 45_000),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -724,6 +761,29 @@ fn should_restart(
         return false;
     };
     now.duration_since(started_at) >= Duration::from_secs(minutes.saturating_mul(60))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guess_language_id_includes_vue() {
+        assert_eq!(
+            guess_language_id_from_extensions(&["vue".to_string()]),
+            "vue"
+        );
+    }
+
+    #[test]
+    fn tsserver_adapter_has_sensible_default_timeouts() {
+        let adapter = lspi_lsp::LspAdapter::TsServerProtocol;
+        let ms = adapter_default_request_timeout_overrides_ms(&adapter);
+        assert!(ms.get("textDocument/documentSymbol").copied().unwrap_or(0) >= 60_000);
+        assert!(ms.get("textDocument/definition").copied().unwrap_or(0) >= 45_000);
+        assert!(ms.get("textDocument/references").copied().unwrap_or(0) >= 45_000);
+        assert!(ms.get("textDocument/rename").copied().unwrap_or(0) >= 45_000);
+    }
 }
 
 async fn shutdown_rust_analyzer_arc(
