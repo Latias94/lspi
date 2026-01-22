@@ -14,6 +14,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 ### Changed
 
 - MCP tool schemas: add clearer descriptions and default/maximum hints for common parameters (`max_results`, snippet controls).
+- LSP client: reply to common server-initiated requests (`workspace/configuration`, `workspace/workspaceFolders`, etc.) to improve generic LSP compatibility.
 
 ## [0.1.0] - 2026-01-22
 
