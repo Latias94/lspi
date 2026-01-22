@@ -20,8 +20,12 @@ impl LspiMcpServer {
             effective_max_total_chars(&self.state.config, args.max_total_chars);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();

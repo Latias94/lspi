@@ -63,7 +63,9 @@ impl LspiMcpServer {
             options.config_path.as_deref(),
             options.workspace_root.as_deref(),
         )?;
-        let servers = lspi_core::config::resolved_servers(&loaded.config, &loaded.workspace_root);
+        let workspace_root = loaded.workspace_root;
+        let servers = lspi_core::config::resolved_servers(&loaded.config, &workspace_root);
+        let allowed_roots = compute_allowed_roots(&workspace_root, &servers);
 
         let all_tools = tools::all_tools();
         let tools = tools::filter_tools_by_config(all_tools, loaded.config.mcp.as_ref());
@@ -71,7 +73,8 @@ impl LspiMcpServer {
         let server = Self {
             tools: Arc::new(tools),
             state: Arc::new(LspiState {
-                workspace_root: loaded.workspace_root,
+                workspace_root,
+                allowed_roots,
                 config: loaded.config,
                 servers,
                 rust_analyzer: Mutex::new(HashMap::new()),
@@ -229,11 +232,42 @@ impl<T> ManagedClient<T> {
 
 struct LspiState {
     workspace_root: PathBuf,
+    allowed_roots: Vec<PathBuf>,
     config: lspi_core::config::LspiConfig,
     servers: Vec<lspi_core::config::ResolvedServerConfig>,
     rust_analyzer: Mutex<HashMap<String, ManagedClient<lspi_lsp::RustAnalyzerClient>>>,
     omnisharp: Mutex<HashMap<String, ManagedClient<lspi_lsp::OmniSharpClient>>>,
     generic: Mutex<HashMap<String, ManagedClient<lspi_lsp::GenericLspClient>>>,
+}
+
+fn compute_allowed_roots(
+    workspace_root: &Path,
+    servers: &[lspi_core::config::ResolvedServerConfig],
+) -> Vec<PathBuf> {
+    use std::collections::HashSet;
+
+    let mut seen = HashSet::<PathBuf>::new();
+    let mut out = Vec::<PathBuf>::new();
+
+    let mut push = |p: PathBuf| {
+        let canon = p.canonicalize().unwrap_or(p);
+        if seen.insert(canon.clone()) {
+            out.push(canon);
+        }
+    };
+
+    push(workspace_root.to_path_buf());
+    for s in servers {
+        push(s.root_dir.clone());
+        for wf in &s.workspace_folders {
+            push(wf.clone());
+        }
+    }
+
+    // Prefer the most specific roots first (useful for debugging and future tie-breaking).
+    out.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+
+    out
 }
 
 fn lsp_position_1based(pos: &lspi_lsp::LspPosition) -> Value {
@@ -566,13 +600,14 @@ struct ReferenceMatchOut {
 
 async fn maybe_snippet_for_file_path(
     workspace_root: &Path,
+    allowed_roots: &[PathBuf],
     file_path: &str,
     center_line: u32,
     context_lines: usize,
     max_chars: usize,
 ) -> anyhow::Result<Option<lspi_core::snippet::Snippet>> {
     let path = PathBuf::from(file_path);
-    let abs = canonicalize_within(workspace_root, &path).ok();
+    let abs = canonicalize_within(workspace_root, allowed_roots, &path).ok();
     let Some(abs) = abs else {
         return Ok(None);
     };
@@ -818,26 +853,26 @@ fn parse_arguments<T: for<'de> Deserialize<'de>>(
         .map_err(|e| McpError::invalid_params(e.to_string(), None))
 }
 
-fn canonicalize_within(workspace_root: &Path, file_path: &Path) -> anyhow::Result<PathBuf> {
-    let root = workspace_root
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize workspace root: {workspace_root:?}"))?;
-
+fn canonicalize_within(
+    workspace_root: &Path,
+    allowed_roots: &[PathBuf],
+    file_path: &Path,
+) -> anyhow::Result<PathBuf> {
     let combined = if file_path.is_absolute() {
         file_path.to_path_buf()
     } else {
-        root.join(file_path)
+        workspace_root.join(file_path)
     };
 
     let file = combined
         .canonicalize()
         .with_context(|| format!("failed to canonicalize file path: {combined:?}"))?;
 
-    if !file.starts_with(&root) {
+    if !allowed_roots.iter().any(|root| file.starts_with(root)) {
         return Err(anyhow::anyhow!(
-            "file_path is outside workspace_root (workspace_root={:?}, file_path={:?})",
-            root,
-            file
+            "file_path is outside allowed roots (workspace_root={:?}, file_path={:?})",
+            workspace_root,
+            file,
         ));
     }
     Ok(file)
@@ -854,10 +889,30 @@ mod boundary_tests {
         let outside_dir = tempdir().unwrap();
 
         let root = root_dir.path();
+        let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let allowed_roots = vec![root_canon];
         let outside_file = outside_dir.path().join("x.rs");
         std::fs::write(&outside_file, "fn main() {}\n").unwrap();
 
-        let err = canonicalize_within(root, &outside_file).unwrap_err();
-        assert!(err.to_string().contains("outside workspace_root"));
+        let err = canonicalize_within(root, &allowed_roots, &outside_file).unwrap_err();
+        assert!(err.to_string().contains("outside allowed roots"));
+    }
+
+    #[test]
+    fn canonicalize_within_accepts_paths_inside_additional_root() {
+        let root_dir = tempdir().unwrap();
+        let extra_dir = tempdir().unwrap();
+
+        let root = root_dir.path();
+        let extra = extra_dir.path();
+        let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let extra_canon = extra.canonicalize().unwrap_or_else(|_| extra.to_path_buf());
+        let allowed_roots = vec![root_canon, extra_canon.clone()];
+
+        let extra_file = extra.join("x.rs");
+        std::fs::write(&extra_file, "fn main() {}\n").unwrap();
+
+        let abs = canonicalize_within(root, &allowed_roots, &extra_file).unwrap();
+        assert!(abs.starts_with(&extra_canon));
     }
 }

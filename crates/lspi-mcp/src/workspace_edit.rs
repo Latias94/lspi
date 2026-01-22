@@ -58,18 +58,20 @@ async fn uri_to_path_maybe(uri: &str) -> anyhow::Result<Option<PathBuf>> {
 }
 
 pub(crate) async fn apply_workspace_edit(
-    workspace_root: &Path,
+    allowed_roots: &[PathBuf],
     changes: &HashMap<String, Vec<lspi_lsp::LspTextEdit>>,
     expected_before_sha256: Option<&HashMap<String, String>>,
     create_backups: bool,
     backup_suffix: &str,
 ) -> anyhow::Result<ApplyWorkspaceEditResult> {
-    let root = workspace_root.canonicalize().with_context(|| {
-        format!(
-            "failed to canonicalize workspace root: {}",
-            workspace_root.to_string_lossy()
-        )
-    })?;
+    if allowed_roots.is_empty() {
+        return Err(anyhow::anyhow!("allowed_roots must not be empty"));
+    }
+    let roots = allowed_roots
+        .iter()
+        .cloned()
+        .map(|p| p.canonicalize().unwrap_or(p))
+        .collect::<Vec<_>>();
 
     struct FileState {
         path: PathBuf,
@@ -90,10 +92,10 @@ pub(crate) async fn apply_workspace_edit(
         let canonical = path
             .canonicalize()
             .with_context(|| format!("failed to canonicalize {path:?}"))?;
-        if !canonical.starts_with(&root) {
+        if !roots.iter().any(|root| canonical.starts_with(root)) {
             return Err(anyhow::anyhow!(
-                "refusing to write outside workspace root (root={:?}, path={:?})",
-                root,
+                "refusing to write outside allowed roots (roots={:?}, path={:?})",
+                roots,
                 canonical
             ));
         }
@@ -273,6 +275,7 @@ mod tests {
     async fn apply_workspace_edit_happy_path_creates_backup_and_writes_file() {
         let root_dir = tempdir().unwrap();
         let root = root_dir.path();
+        let allowed_roots = vec![root.to_path_buf()];
 
         let file_path = root.join("a.rs");
         tokio::fs::write(&file_path, "hello\n").await.unwrap();
@@ -302,7 +305,7 @@ mod tests {
         let mut changes: HashMap<String, Vec<lspi_lsp::LspTextEdit>> = HashMap::new();
         changes.insert(file_uri(&canonical), vec![edit]);
 
-        let result = apply_workspace_edit(root, &changes, Some(&expected), true, ".bak")
+        let result = apply_workspace_edit(&allowed_roots, &changes, Some(&expected), true, ".bak")
             .await
             .unwrap();
 
@@ -321,6 +324,7 @@ mod tests {
     async fn apply_workspace_edit_rejects_sha256_mismatch_without_writing() {
         let root_dir = tempdir().unwrap();
         let root = root_dir.path();
+        let allowed_roots = vec![root.to_path_buf()];
 
         let file_path = root.join("a.rs");
         tokio::fs::write(&file_path, "hello\n").await.unwrap();
@@ -349,7 +353,7 @@ mod tests {
         let mut changes: HashMap<String, Vec<lspi_lsp::LspTextEdit>> = HashMap::new();
         changes.insert(file_uri(&canonical), vec![edit]);
 
-        let err = apply_workspace_edit(root, &changes, Some(&expected), true, ".bak")
+        let err = apply_workspace_edit(&allowed_roots, &changes, Some(&expected), true, ".bak")
             .await
             .unwrap_err();
         assert!(err.to_string().contains("sha256 mismatch"));
@@ -365,6 +369,7 @@ mod tests {
     async fn apply_workspace_edit_rolls_back_and_removes_backup_on_apply_error() {
         let root_dir = tempdir().unwrap();
         let root = root_dir.path();
+        let allowed_roots = vec![root.to_path_buf()];
 
         let file_path = root.join("a.rs");
         tokio::fs::write(&file_path, "hello\n").await.unwrap();
@@ -388,7 +393,7 @@ mod tests {
         let mut changes: HashMap<String, Vec<lspi_lsp::LspTextEdit>> = HashMap::new();
         changes.insert(file_uri(&canonical), vec![edit]);
 
-        let _err = apply_workspace_edit(root, &changes, None, true, ".bak")
+        let _err = apply_workspace_edit(&allowed_roots, &changes, None, true, ".bak")
             .await
             .unwrap_err();
 
@@ -403,6 +408,7 @@ mod tests {
     async fn apply_workspace_edit_refuses_writes_outside_workspace_root() {
         let root_dir = tempdir().unwrap();
         let root = root_dir.path();
+        let allowed_roots = vec![root.to_path_buf()];
 
         let outside = tempdir().unwrap();
         let file_path = outside.path().join("a.rs");
@@ -427,10 +433,10 @@ mod tests {
         let mut changes: HashMap<String, Vec<lspi_lsp::LspTextEdit>> = HashMap::new();
         changes.insert(file_uri(&canonical), vec![edit]);
 
-        let err = apply_workspace_edit(root, &changes, None, true, ".bak")
+        let err = apply_workspace_edit(&allowed_roots, &changes, None, true, ".bak")
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("outside workspace root"));
+        assert!(err.to_string().contains("outside allowed roots"));
 
         let current_text = tokio::fs::read_to_string(&canonical).await.unwrap();
         assert_eq!(current_text, "hello\n");
@@ -443,6 +449,7 @@ mod tests {
     async fn apply_workspace_edit_rejects_backup_suffix_with_path_separator() {
         let root_dir = tempdir().unwrap();
         let root = root_dir.path();
+        let allowed_roots = vec![root.to_path_buf()];
 
         let file_path = root.join("a.rs");
         tokio::fs::write(&file_path, "hello\n").await.unwrap();
@@ -466,7 +473,7 @@ mod tests {
         let mut changes: HashMap<String, Vec<lspi_lsp::LspTextEdit>> = HashMap::new();
         changes.insert(file_uri(&canonical), vec![edit]);
 
-        let err = apply_workspace_edit(root, &changes, None, true, "/../evil")
+        let err = apply_workspace_edit(&allowed_roots, &changes, None, true, "/../evil")
             .await
             .unwrap_err();
         assert!(err.to_string().contains("backup_suffix"));
@@ -476,5 +483,45 @@ mod tests {
 
         let backup_path = expected_backup_path(&canonical, "/../evil");
         assert!(!backup_path.exists());
+    }
+
+    #[tokio::test]
+    async fn apply_workspace_edit_allows_writes_inside_additional_root() {
+        let root_dir = tempdir().unwrap();
+        let extra_dir = tempdir().unwrap();
+
+        let root = root_dir.path();
+        let extra = extra_dir.path();
+        let allowed_roots = vec![root.to_path_buf(), extra.to_path_buf()];
+
+        let file_path = extra.join("a.rs");
+        tokio::fs::write(&file_path, "hello\n").await.unwrap();
+
+        let canonical = file_path.canonicalize().unwrap();
+
+        let edit = lspi_lsp::LspTextEdit {
+            range: lspi_lsp::LspRange {
+                start: lspi_lsp::LspPosition {
+                    line: 0,
+                    character: 0,
+                },
+                end: lspi_lsp::LspPosition {
+                    line: 0,
+                    character: 5,
+                },
+            },
+            new_text: "world".to_string(),
+        };
+
+        let mut changes: HashMap<String, Vec<lspi_lsp::LspTextEdit>> = HashMap::new();
+        changes.insert(file_uri(&canonical), vec![edit]);
+
+        let result = apply_workspace_edit(&allowed_roots, &changes, None, false, ".bak")
+            .await
+            .unwrap();
+        assert_eq!(result.files_modified.len(), 1);
+
+        let new_text = tokio::fs::read_to_string(&canonical).await.unwrap();
+        assert_eq!(new_text, "world\n");
     }
 }

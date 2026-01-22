@@ -19,8 +19,12 @@ impl LspiMcpServer {
         let dry_run = args.dry_run.unwrap_or(true);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -51,11 +55,7 @@ impl LspiMcpServer {
         }
 
         if candidates.len() > 1 {
-            let root = self
-                .state
-                .workspace_root
-                .canonicalize()
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let root = &self.state.workspace_root;
             let abs_uri = Url::from_file_path(&abs_file)
                 .ok()
                 .map(|u| u.to_string())
@@ -72,7 +72,8 @@ impl LspiMcpServer {
                 };
 
                 let snippet = match maybe_snippet_for_file_path(
-                    &root,
+                    root,
+                    &self.state.allowed_roots,
                     &abs_file.to_string_lossy(),
                     selection_start_0based.line,
                     0,
@@ -158,7 +159,7 @@ impl LspiMcpServer {
 
         if !dry_run {
             let apply_result = workspace_edit::apply_workspace_edit(
-                &self.state.workspace_root,
+                &self.state.allowed_roots,
                 &changes,
                 args.expected_before_sha256.as_ref(),
                 args.create_backups.unwrap_or(true),
@@ -216,8 +217,12 @@ impl LspiMcpServer {
         let dry_run = args.dry_run.unwrap_or(true);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -302,7 +307,7 @@ impl LspiMcpServer {
 
         if !dry_run {
             let apply_result = workspace_edit::apply_workspace_edit(
-                &self.state.workspace_root,
+                &self.state.allowed_roots,
                 &changes,
                 args.expected_before_sha256.as_ref(),
                 args.create_backups.unwrap_or(true),

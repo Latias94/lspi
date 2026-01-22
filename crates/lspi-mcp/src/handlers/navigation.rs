@@ -28,8 +28,12 @@ impl LspiMcpServer {
             effective_max_total_chars(&self.state.config, args.max_total_chars);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -109,8 +113,12 @@ impl LspiMcpServer {
             effective_max_total_chars(&self.state.config, args.max_total_chars);
 
         let routed = if let Some(file_path) = args.file_path.as_deref() {
-            let abs_file = canonicalize_within(&self.state.workspace_root, Path::new(file_path))
-                .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+            let abs_file = canonicalize_within(
+                &self.state.workspace_root,
+                &self.state.allowed_roots,
+                Path::new(file_path),
+            )
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
             self.client_for_file(&abs_file).await?
         } else if self.state.servers.len() == 1 {
             let server = self
@@ -194,8 +202,12 @@ impl LspiMcpServer {
         let max_snippet_chars = args.max_snippet_chars.unwrap_or(400).clamp(40, 4000);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -210,11 +222,7 @@ impl LspiMcpServer {
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-        let root = self
-            .state
-            .workspace_root
-            .canonicalize()
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let root = &self.state.workspace_root;
 
         let mut snippet_truncated = false;
         let mut snippet_skipped = 0usize;
@@ -229,7 +237,8 @@ impl LspiMcpServer {
             for d in m.definitions {
                 let snippet = if include_snippet {
                     match maybe_snippet_for_file_path(
-                        &root,
+                        root,
+                        &self.state.allowed_roots,
                         &d.file_path,
                         d.range.start.line,
                         snippet_context_lines,
@@ -368,8 +377,12 @@ impl LspiMcpServer {
         let max_snippet_chars = args.max_snippet_chars.unwrap_or(400).clamp(40, 4000);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -435,11 +448,7 @@ impl LspiMcpServer {
             });
         };
 
-        let root = self
-            .state
-            .workspace_root
-            .canonicalize()
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let root = &self.state.workspace_root;
 
         let mut snippet_truncated = false;
         let mut snippet_skipped = 0usize;
@@ -448,7 +457,8 @@ impl LspiMcpServer {
         for d in definitions {
             let snippet = if include_snippet {
                 match maybe_snippet_for_file_path(
-                    &root,
+                    root,
+                    &self.state.allowed_roots,
                     &d.file_path,
                     d.range.start.line,
                     snippet_context_lines,
@@ -558,8 +568,12 @@ impl LspiMcpServer {
         let max_snippet_chars = args.max_snippet_chars.unwrap_or(400).clamp(40, 4000);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -627,11 +641,7 @@ impl LspiMcpServer {
             });
         };
 
-        let root = self
-            .state
-            .workspace_root
-            .canonicalize()
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let root = &self.state.workspace_root;
 
         let mut snippet_truncated = false;
         let mut snippet_skipped = 0usize;
@@ -640,7 +650,8 @@ impl LspiMcpServer {
         for r in references {
             let snippet = if include_snippet {
                 match maybe_snippet_for_file_path(
-                    &root,
+                    root,
+                    &self.state.allowed_roots,
                     &r.file_path,
                     r.range.start.line,
                     snippet_context_lines,
@@ -754,8 +765,12 @@ impl LspiMcpServer {
             effective_max_total_chars(&self.state.config, args.max_total_chars);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -882,8 +897,12 @@ impl LspiMcpServer {
             effective_max_total_chars(&self.state.config, args.max_total_chars);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -1044,8 +1063,12 @@ impl LspiMcpServer {
             effective_max_total_chars(&self.state.config, args.max_total_chars);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -1209,8 +1232,12 @@ impl LspiMcpServer {
         let max_snippet_chars = args.max_snippet_chars.unwrap_or(200).clamp(40, 4000);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -1241,11 +1268,7 @@ impl LspiMcpServer {
         }
 
         if candidates.len() > 1 {
-            let root = self
-                .state
-                .workspace_root
-                .canonicalize()
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let root = &self.state.workspace_root;
             let abs_uri = Url::from_file_path(&abs_file)
                 .ok()
                 .map(|u| u.to_string())
@@ -1258,7 +1281,8 @@ impl LspiMcpServer {
             for c in candidates {
                 let snippet = if include_snippet {
                     match maybe_snippet_for_file_path(
-                        &root,
+                        root,
+                        &self.state.allowed_roots,
                         &abs_file.to_string_lossy(),
                         c.selection_range.start.line,
                         0,
@@ -1477,8 +1501,12 @@ impl LspiMcpServer {
         let max_snippet_chars = args.max_snippet_chars.unwrap_or(200).clamp(40, 4000);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -1509,11 +1537,7 @@ impl LspiMcpServer {
         }
 
         if candidates.len() > 1 {
-            let root = self
-                .state
-                .workspace_root
-                .canonicalize()
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let root = &self.state.workspace_root;
             let abs_uri = Url::from_file_path(&abs_file)
                 .ok()
                 .map(|u| u.to_string())
@@ -1526,7 +1550,8 @@ impl LspiMcpServer {
             for c in candidates {
                 let snippet = if include_snippet {
                     match maybe_snippet_for_file_path(
-                        &root,
+                        root,
+                        &self.state.allowed_roots,
                         &abs_file.to_string_lossy(),
                         c.selection_range.start.line,
                         0,
@@ -1742,8 +1767,12 @@ impl LspiMcpServer {
             effective_max_total_chars(&self.state.config, args.max_total_chars);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -1928,8 +1957,12 @@ impl LspiMcpServer {
             effective_max_total_chars(&self.state.config, args.max_total_chars);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -2118,8 +2151,12 @@ impl LspiMcpServer {
         let max_snippet_chars = args.max_snippet_chars.unwrap_or(400).clamp(40, 4000);
 
         let file_path = PathBuf::from(&args.file_path);
-        let abs_file = canonicalize_within(&self.state.workspace_root, &file_path)
-            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let abs_file = canonicalize_within(
+            &self.state.workspace_root,
+            &self.state.allowed_roots,
+            &file_path,
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         let routed = self.client_for_file(&abs_file).await?;
         let server_id = routed.server_id().to_string();
@@ -2141,11 +2178,7 @@ impl LspiMcpServer {
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-        let root = self
-            .state
-            .workspace_root
-            .canonicalize()
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let root = &self.state.workspace_root;
 
         let mut snippet_truncated = false;
         let mut snippet_skipped = 0usize;
@@ -2160,7 +2193,8 @@ impl LspiMcpServer {
             for r in m.references {
                 let snippet = if include_snippet {
                     match maybe_snippet_for_file_path(
-                        &root,
+                        root,
+                        &self.state.allowed_roots,
                         &r.file_path,
                         r.range.start.line,
                         snippet_context_lines,
