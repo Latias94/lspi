@@ -26,6 +26,7 @@ metadata:
 - Prefer `*_at` tools when you have a cursor position: they apply bounded position fuzzing.
 - For multi-language workspaces: `search_workspace_symbols` MUST include `file_path` if multiple language servers are configured.
 - `rename_symbol` / `rename_symbol_strict` defaults to preview (`dry_run=true`). Only apply edits when explicitly requested.
+- Most tools accept `max_results` and `max_total_chars`. For reproducible behavior, set them explicitly when needed.
 
 ## Recommended workflow (read → verify → change)
 

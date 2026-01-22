@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 This project follows a lightweight variant of "Keep a Changelog". Versions use semantic versioning where practical.
 
+## [0.2.0] - Unreleased
+
+### Fixed
+
+- LSP client: avoid leaking pending requests when a request write fails or times out.
+- MCP: harden backup file path generation to prevent path traversal via `backup_suffix`.
+
+### Changed
+
+- MCP tool schemas: add clearer descriptions and default/maximum hints for common parameters (`max_results`, snippet controls).
+
 ## [0.1.0] - 2026-01-22
 
 Initial 0.1.0 milestone of `lspi` (Rust workspace), providing an MCP stdio server that bridges LSP features for AI coding CLIs (starting with Codex).
