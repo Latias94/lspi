@@ -109,11 +109,12 @@ When a tool call fails:
    - `get_current_config`
    - `list_servers`
    - `get_server_status`
-3) Common root causes:
+3) If you can run CLI commands, prefer `lspi doctor --workspace-root . --json` for a machine-readable environment/config report.
+4) Common root causes:
    - routing mismatch: `servers[].extensions` does not match the file
    - workspace boundary: `file_path` is outside `workspace_root` / `servers[].workspace_folders`
-   - server missing: language server command not installed or not configured
-   - timeouts: increase `request_timeout_ms` or use `request_timeout_overrides_ms` for slow methods
+    - server missing: language server command not installed or not configured
+    - timeouts: increase `request_timeout_ms` or use `request_timeout_overrides_ms` for slow methods
 
 ## References / inspiration
 
@@ -121,4 +122,3 @@ This project borrows ideas from:
 
 - `cclsp`: https://github.com/ktnyt/cclsp
 - `serena`: https://github.com/oraios/serena
-

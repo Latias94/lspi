@@ -657,6 +657,8 @@ dependencies = [
  "lspi-core",
  "lspi-lsp",
  "lspi-mcp",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",

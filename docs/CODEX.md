@@ -65,6 +65,8 @@ Notes:
 
 For a deeper explanation of `structuredContent`, `next_steps`, truncation/caps, and debugging workflow, see `docs/MCP.md`.
 
+Tip: if you can run local commands, `lspi doctor --workspace-root . --json` prints a machine-readable report (useful for agents).
+
 ## Recommended: Add agent instructions (two options)
 
 ### Option A: Add an `AGENTS.md` snippet (works for any agent)

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use serde::Serialize;
 use std::collections::VecDeque;
 use std::env;
 use std::io::{self, IsTerminal, Write};
@@ -71,6 +72,9 @@ enum Command {
         /// Override workspace root (defaults to config or current directory)
         #[arg(long)]
         workspace_root: Option<PathBuf>,
+        /// Print machine-readable JSON report to stdout
+        #[arg(long)]
+        json: bool,
     },
     /// Generate a starter `.lspi/config.toml` for this workspace (prints by default)
     Setup {
@@ -183,219 +187,8 @@ async fn main() -> Result<()> {
         Command::Doctor {
             config,
             workspace_root,
-        } => {
-            let loaded =
-                lspi_core::config::load_config(config.as_deref(), workspace_root.as_deref())?;
-
-            println!("config_source: {:?}", loaded.source);
-            println!("workspace_root: {}", loaded.workspace_root.display());
-
-            let servers =
-                lspi_core::config::resolved_servers(&loaded.config, &loaded.workspace_root);
-            println!("servers.count: {}", servers.len());
-            for (idx, s) in servers.iter().enumerate() {
-                println!("server[{idx}].id: {}", s.id);
-                println!("server[{idx}].kind: {}", s.kind);
-                println!("server[{idx}].root_dir: {}", s.root_dir.display());
-                println!("server[{idx}].extensions: {:?}", s.extensions);
-                println!("server[{idx}].language_id: {:?}", s.language_id);
-                println!("server[{idx}].command: {:?}", s.command);
-                println!("server[{idx}].args: {:?}", s.args);
-                println!(
-                    "server[{idx}].timeouts_ms: initialize={:?} request={:?} warmup={:?}",
-                    s.initialize_timeout_ms, s.request_timeout_ms, s.warmup_timeout_ms
-                );
-            }
-
-            if let Some(mcp) = loaded.config.mcp.as_ref().and_then(|m| m.output.as_ref()) {
-                println!(
-                    "mcp.output.max_total_chars: default={:?} hard={:?}",
-                    mcp.max_total_chars_default, mcp.max_total_chars_hard
-                );
-            } else {
-                println!("mcp.output: <not configured>");
-            }
-
-            let mut failures = Vec::<String>::new();
-            for s in servers {
-                if !is_rust_analyzer_kind(&s.kind) {
-                    if is_omnisharp_kind(&s.kind) {
-                        let command = match s.command.as_deref() {
-                            Some(c) if !c.trim().is_empty() => c.to_string(),
-                            _ => lspi_lsp::resolve_omnisharp_command().await?,
-                        };
-
-                        println!(
-                            "server_preflight: id={} kind={} command={}",
-                            s.id, s.kind, command
-                        );
-
-                        if let Err(err) = lspi_lsp::preflight_omnisharp(&command).await {
-                            eprintln!("doctor_error: id={} kind={} error={:#}", s.id, s.kind, err);
-                            eprintln!(
-                                "doctor_hint: Install OmniSharp and ensure `omnisharp` is on PATH, or set LSPI_OMNISHARP_COMMAND."
-                            );
-                            eprintln!(
-                                "doctor_hint: On Windows, OmniSharp often ships with editor extensions (e.g. VS Code C#). You may need to expose the OmniSharp binary as `omnisharp`."
-                            );
-                            eprintln!(
-                                "doctor_hint: Also ensure `dotnet` is installed (OmniSharp depends on a .NET runtime/SDK)."
-                            );
-                            eprintln!("doctor_hint: Check: `dotnet --info`");
-                            failures
-                                .push(format!("omnisharp preflight failed for server id={}", s.id));
-                            continue;
-                        }
-
-                        let output = TokioCommand::new(&command).arg("--version").output().await;
-                        if let Ok(output) = output {
-                            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                            if !stdout.is_empty() {
-                                println!("server_version: id={} {stdout}", s.id);
-                            } else if !stderr.is_empty() {
-                                println!("server_version: id={} {stderr}", s.id);
-                            } else {
-                                println!("server_version: id={} <unknown>", s.id);
-                            }
-                        } else {
-                            println!("server_version: id={} <unknown>", s.id);
-                        }
-
-                        let dotnet_ok = TokioCommand::new("dotnet")
-                            .arg("--info")
-                            .output()
-                            .await
-                            .is_ok();
-                        if !dotnet_ok {
-                            eprintln!(
-                                "doctor_hint: `dotnet` was not found. Install .NET SDK and retry."
-                            );
-                        }
-
-                        continue;
-                    }
-
-                    if is_pyright_kind(&s.kind) {
-                        let normalized_kind = s.kind.trim().to_ascii_lowercase().replace('-', "_");
-                        let command = match s.command.as_deref() {
-                            Some(c) if !c.trim().is_empty() => c.to_string(),
-                            _ if normalized_kind == "basedpyright" => {
-                                lspi_lsp::resolve_basedpyright_command().await?
-                            }
-                            _ => lspi_lsp::resolve_pyright_command().await?,
-                        };
-
-                        println!(
-                            "server_preflight: id={} kind={} command={}",
-                            s.id, s.kind, command
-                        );
-
-                        if let Err(err) = lspi_lsp::preflight_pyright(&command).await {
-                            eprintln!("doctor_error: id={} kind={} error={:#}", s.id, s.kind, err);
-                            eprintln!(
-                                "doctor_hint: Install Pyright (e.g. `npm i -g pyright`) and ensure `pyright-langserver` is on PATH."
-                            );
-                            eprintln!(
-                                "doctor_hint: Or set LSPI_PYRIGHT_COMMAND / LSPI_BASEDPYRIGHT_COMMAND, or servers[].command explicitly."
-                            );
-                            failures
-                                .push(format!("pyright preflight failed for server id={}", s.id));
-                            continue;
-                        }
-
-                        let output = TokioCommand::new(&command).arg("--version").output().await;
-                        if let Ok(output) = output {
-                            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                            if !stdout.is_empty() {
-                                println!("server_version: id={} {stdout}", s.id);
-                            } else if !stderr.is_empty() {
-                                println!("server_version: id={} {stderr}", s.id);
-                            } else {
-                                println!("server_version: id={} <unknown>", s.id);
-                            }
-                        } else {
-                            println!("server_version: id={} <unknown>", s.id);
-                        }
-
-                        continue;
-                    }
-
-                    if is_generic_kind(&s.kind) {
-                        let Some(command) = s.command.as_deref().filter(|c| !c.trim().is_empty())
-                        else {
-                            eprintln!(
-                                "doctor_error: id={} kind={} error=missing command for generic server",
-                                s.id, s.kind
-                            );
-                            eprintln!(
-                                "doctor_hint: For kind=generic, set servers[].command explicitly."
-                            );
-                            failures
-                                .push(format!("generic server missing command for id={}", s.id));
-                            continue;
-                        };
-
-                        println!(
-                            "server_preflight: id={} kind={} command={}",
-                            s.id, s.kind, command
-                        );
-                        continue;
-                    }
-
-                    println!(
-                        "server_preflight: id={} kind={} <unsupported>",
-                        s.id, s.kind
-                    );
-                    continue;
-                }
-
-                let command = match s.command.as_deref() {
-                    Some(c) if !c.trim().is_empty() => c.to_string(),
-                    _ => lspi_lsp::resolve_rust_analyzer_command().await?,
-                };
-
-                println!(
-                    "server_preflight: id={} kind={} command={}",
-                    s.id, s.kind, command
-                );
-                if let Err(err) = lspi_lsp::preflight_rust_analyzer(&command).await {
-                    eprintln!("doctor_error: id={} kind={} error={:#}", s.id, s.kind, err);
-                    eprintln!(
-                        "doctor_hint: Install rust-analyzer via `rustup component add rust-analyzer`, or set LSPI_RUST_ANALYZER_COMMAND."
-                    );
-                    failures.push(format!(
-                        "rust-analyzer preflight failed for server id={}",
-                        s.id
-                    ));
-                    continue;
-                }
-
-                let output = TokioCommand::new(&command)
-                    .arg("--version")
-                    .output()
-                    .await?;
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                if !stdout.is_empty() {
-                    println!("server_version: id={} {stdout}", s.id);
-                } else if !stderr.is_empty() {
-                    println!("server_version: id={} {stderr}", s.id);
-                } else {
-                    println!("server_version: id={} <unknown>", s.id);
-                }
-            }
-
-            if !failures.is_empty() {
-                anyhow::bail!(
-                    "doctor failed for {} server(s). See stderr for details.",
-                    failures.len()
-                );
-            }
-
-            Ok(())
-        }
+            json,
+        } => run_doctor(config, workspace_root, json).await,
         Command::Setup {
             workspace_root,
             output,
@@ -549,6 +342,362 @@ fn prompt_line(prompt: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    schema_version: u32,
+    config_source: String,
+    workspace_root: String,
+    mcp_output: Option<DoctorMcpOutput>,
+    servers: Vec<DoctorServer>,
+    failures: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorMcpOutput {
+    max_total_chars_default: Option<usize>,
+    max_total_chars_hard: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorServer {
+    id: String,
+    kind: String,
+    root_dir: String,
+    extensions: Vec<String>,
+    language_id: Option<String>,
+    command_config: Option<String>,
+    args: Vec<String>,
+    timeouts_ms: DoctorTimeoutsMs,
+    preflight: DoctorPreflight,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorTimeoutsMs {
+    initialize: Option<u64>,
+    request: Option<u64>,
+    warmup: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorPreflight {
+    ok: bool,
+    command_resolved: Option<String>,
+    version: Option<String>,
+    dotnet_ok: Option<bool>,
+    errors: Vec<String>,
+    hints: Vec<String>,
+}
+
+async fn run_doctor(
+    config: Option<PathBuf>,
+    workspace_root: Option<PathBuf>,
+    json: bool,
+) -> Result<()> {
+    let loaded = lspi_core::config::load_config(config.as_deref(), workspace_root.as_deref())?;
+
+    let servers = lspi_core::config::resolved_servers(&loaded.config, &loaded.workspace_root);
+    let mut failures = Vec::<String>::new();
+    let mut server_reports = Vec::<DoctorServer>::new();
+
+    for s in &servers {
+        let mut preflight = DoctorPreflight {
+            ok: true,
+            command_resolved: None,
+            version: None,
+            dotnet_ok: None,
+            errors: Vec::new(),
+            hints: Vec::new(),
+        };
+
+        let mut resolved_command: Option<String> = None;
+        let mut try_version = false;
+
+        if is_rust_analyzer_kind(&s.kind) {
+            try_version = true;
+            resolved_command = match s.command.as_deref() {
+                Some(c) if !c.trim().is_empty() => Some(c.to_string()),
+                _ => match lspi_lsp::resolve_rust_analyzer_command().await {
+                    Ok(c) => Some(c),
+                    Err(err) => {
+                        preflight.ok = false;
+                        preflight
+                            .errors
+                            .push(format!("failed to resolve rust-analyzer command: {err:#}"));
+                        preflight.hints.push(
+                            "Install rust-analyzer via `rustup component add rust-analyzer`, or set LSPI_RUST_ANALYZER_COMMAND."
+                                .to_string(),
+                        );
+                        failures.push(format!(
+                            "rust-analyzer command resolution failed for server id={}",
+                            s.id
+                        ));
+                        None
+                    }
+                },
+            };
+        } else if is_omnisharp_kind(&s.kind) {
+            try_version = true;
+            resolved_command = match s.command.as_deref() {
+                Some(c) if !c.trim().is_empty() => Some(c.to_string()),
+                _ => match lspi_lsp::resolve_omnisharp_command().await {
+                    Ok(c) => Some(c),
+                    Err(err) => {
+                        preflight.ok = false;
+                        preflight
+                            .errors
+                            .push(format!("failed to resolve omnisharp command: {err:#}"));
+                        preflight.hints.push(
+                            "Install OmniSharp and ensure `omnisharp` is on PATH, or set LSPI_OMNISHARP_COMMAND."
+                                .to_string(),
+                        );
+                        failures.push(format!(
+                            "omnisharp command resolution failed for server id={}",
+                            s.id
+                        ));
+                        None
+                    }
+                },
+            };
+        } else if is_pyright_kind(&s.kind) {
+            try_version = true;
+            let normalized_kind = s.kind.trim().to_ascii_lowercase().replace('-', "_");
+            resolved_command = match s.command.as_deref() {
+                Some(c) if !c.trim().is_empty() => Some(c.to_string()),
+                _ if normalized_kind == "basedpyright" => {
+                    match lspi_lsp::resolve_basedpyright_command().await {
+                        Ok(c) => Some(c),
+                        Err(err) => {
+                            preflight.ok = false;
+                            preflight
+                                .errors
+                                .push(format!("failed to resolve basedpyright command: {err:#}"));
+                            preflight.hints.push(
+                                "Install BasedPyright and ensure `basedpyright-langserver` is on PATH, or set LSPI_BASEDPYRIGHT_COMMAND."
+                                    .to_string(),
+                            );
+                            failures.push(format!(
+                                "basedpyright command resolution failed for server id={}",
+                                s.id
+                            ));
+                            None
+                        }
+                    }
+                }
+                _ => match lspi_lsp::resolve_pyright_command().await {
+                    Ok(c) => Some(c),
+                    Err(err) => {
+                        preflight.ok = false;
+                        preflight
+                            .errors
+                            .push(format!("failed to resolve pyright command: {err:#}"));
+                        preflight.hints.push(
+                            "Install Pyright (e.g. `npm i -g pyright`) and ensure `pyright-langserver` is on PATH, or set LSPI_PYRIGHT_COMMAND."
+                                .to_string(),
+                        );
+                        failures.push(format!(
+                            "pyright command resolution failed for server id={}",
+                            s.id
+                        ));
+                        None
+                    }
+                },
+            };
+        } else if is_generic_kind(&s.kind) {
+            resolved_command = match s.command.as_deref().filter(|c| !c.trim().is_empty()) {
+                Some(c) => Some(c.to_string()),
+                None => {
+                    preflight.ok = false;
+                    preflight.errors.push(
+                        "missing command for generic server (set servers[].command)".to_string(),
+                    );
+                    preflight
+                        .hints
+                        .push("For kind=generic, set servers[].command explicitly.".to_string());
+                    failures.push(format!("generic server missing command for id={}", s.id));
+                    None
+                }
+            };
+        } else {
+            preflight
+                .hints
+                .push("unsupported server kind (skipped preflight)".to_string());
+        }
+
+        preflight.command_resolved = resolved_command.clone();
+
+        if let Some(command) = resolved_command.as_deref() {
+            if is_rust_analyzer_kind(&s.kind) {
+                if let Err(err) = lspi_lsp::preflight_rust_analyzer(command).await {
+                    preflight.ok = false;
+                    preflight
+                        .errors
+                        .push(format!("rust-analyzer preflight failed: {err:#}"));
+                    preflight.hints.push(
+                        "Install rust-analyzer via `rustup component add rust-analyzer`, or set LSPI_RUST_ANALYZER_COMMAND."
+                            .to_string(),
+                    );
+                    failures.push(format!(
+                        "rust-analyzer preflight failed for server id={}",
+                        s.id
+                    ));
+                }
+            } else if is_omnisharp_kind(&s.kind) {
+                if let Err(err) = lspi_lsp::preflight_omnisharp(command).await {
+                    preflight.ok = false;
+                    preflight
+                        .errors
+                        .push(format!("omnisharp preflight failed: {err:#}"));
+                    preflight.hints.push(
+                        "Install OmniSharp and ensure `omnisharp` is on PATH, or set LSPI_OMNISHARP_COMMAND."
+                            .to_string(),
+                    );
+                    preflight.hints.push(
+                        "Also ensure `dotnet` is installed (OmniSharp depends on a .NET runtime/SDK)."
+                            .to_string(),
+                    );
+                    failures.push(format!("omnisharp preflight failed for server id={}", s.id));
+                } else {
+                    let dotnet_ok = TokioCommand::new("dotnet")
+                        .arg("--info")
+                        .output()
+                        .await
+                        .is_ok();
+                    preflight.dotnet_ok = Some(dotnet_ok);
+                    if !dotnet_ok {
+                        preflight.hints.push(
+                            "`dotnet` was not found. Install .NET SDK and retry.".to_string(),
+                        );
+                    }
+                }
+            } else if is_pyright_kind(&s.kind) {
+                if let Err(err) = lspi_lsp::preflight_pyright(command).await {
+                    preflight.ok = false;
+                    preflight
+                        .errors
+                        .push(format!("pyright preflight failed: {err:#}"));
+                    preflight.hints.push(
+                        "Install Pyright (e.g. `npm i -g pyright`) and ensure `pyright-langserver` is on PATH."
+                            .to_string(),
+                    );
+                    preflight.hints.push(
+                        "Or set LSPI_PYRIGHT_COMMAND / LSPI_BASEDPYRIGHT_COMMAND, or servers[].command explicitly."
+                            .to_string(),
+                    );
+                    failures.push(format!("pyright preflight failed for server id={}", s.id));
+                }
+            }
+        }
+
+        if try_version {
+            if let Some(command) = resolved_command.as_deref() {
+                let output = TokioCommand::new(command).arg("--version").output().await;
+                if let Ok(output) = output {
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    preflight.version = if !stdout.is_empty() {
+                        Some(stdout)
+                    } else if !stderr.is_empty() {
+                        Some(stderr)
+                    } else {
+                        None
+                    };
+                }
+            }
+        }
+
+        server_reports.push(DoctorServer {
+            id: s.id.clone(),
+            kind: s.kind.clone(),
+            root_dir: s.root_dir.display().to_string(),
+            extensions: s.extensions.clone(),
+            language_id: s.language_id.clone(),
+            command_config: s.command.clone(),
+            args: s.args.clone(),
+            timeouts_ms: DoctorTimeoutsMs {
+                initialize: s.initialize_timeout_ms,
+                request: s.request_timeout_ms,
+                warmup: s.warmup_timeout_ms,
+            },
+            preflight,
+        });
+    }
+
+    let mcp_output = loaded
+        .config
+        .mcp
+        .as_ref()
+        .and_then(|m| m.output.as_ref())
+        .map(|o| DoctorMcpOutput {
+            max_total_chars_default: o.max_total_chars_default,
+            max_total_chars_hard: o.max_total_chars_hard,
+        });
+
+    let report = DoctorReport {
+        schema_version: 1,
+        config_source: format!("{:?}", loaded.source),
+        workspace_root: loaded.workspace_root.display().to_string(),
+        mcp_output,
+        servers: server_reports,
+        failures: failures.clone(),
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("config_source: {}", report.config_source);
+        println!("workspace_root: {}", report.workspace_root);
+        println!("servers.count: {}", report.servers.len());
+        for (idx, s) in report.servers.iter().enumerate() {
+            println!("server[{idx}].id: {}", s.id);
+            println!("server[{idx}].kind: {}", s.kind);
+            println!("server[{idx}].root_dir: {}", s.root_dir);
+            println!("server[{idx}].extensions: {:?}", s.extensions);
+            println!("server[{idx}].language_id: {:?}", s.language_id);
+            println!("server[{idx}].command: {:?}", s.command_config);
+            println!("server[{idx}].args: {:?}", s.args);
+            println!(
+                "server[{idx}].timeouts_ms: initialize={:?} request={:?} warmup={:?}",
+                s.timeouts_ms.initialize, s.timeouts_ms.request, s.timeouts_ms.warmup
+            );
+            if let Some(cmd) = s.preflight.command_resolved.as_deref() {
+                println!(
+                    "server_preflight: id={} kind={} command={}",
+                    s.id, s.kind, cmd
+                );
+            } else if s.preflight.errors.is_empty() {
+                println!("server_preflight: id={} kind={} <skipped>", s.id, s.kind);
+            }
+            if let Some(ver) = s.preflight.version.as_deref() {
+                println!("server_version: id={} {ver}", s.id);
+            }
+            for err in &s.preflight.errors {
+                eprintln!("doctor_error: id={} kind={} error={err}", s.id, s.kind);
+            }
+            for hint in &s.preflight.hints {
+                eprintln!("doctor_hint: {hint}");
+            }
+        }
+
+        if let Some(o) = report.mcp_output.as_ref() {
+            println!(
+                "mcp.output.max_total_chars: default={:?} hard={:?}",
+                o.max_total_chars_default, o.max_total_chars_hard
+            );
+        } else {
+            println!("mcp.output: <not configured>");
+        }
+    }
+
+    if !failures.is_empty() {
+        anyhow::bail!(
+            "doctor failed for {} server(s). See stderr for details.",
+            failures.len()
+        );
+    }
+
+    Ok(())
 }
 
 fn default_servers_block() -> String {

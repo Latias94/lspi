@@ -43,6 +43,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 - MCP: read-only mode via `mcp.read_only=true` or `lspi mcp --read-only`.
 - MCP: `mcp.context` preset (and `lspi mcp --context`) for client-oriented defaults (e.g. Codex-safe read-only + smaller output).
 - CLI: `lspi mcp --mode navigation|refactor` convenience presets (sugar for context + read-only/read-write defaults).
+- CLI: `lspi doctor --json` for a machine-readable environment/config report (useful for agents).
 - MCP: introspection tools (`get_current_config`, `list_servers`, `get_server_status`) for debugging routing and server health.
 
 ## [0.1.0] - 2026-01-22
