@@ -49,6 +49,10 @@ pub struct LspServerConfig {
     #[serde(default)]
     #[serde(alias = "workspaceFolders")]
     pub workspace_folders: Option<Vec<PathBuf>>,
+    /// Optional adapter name for server-specific quirks (used primarily by `kind = "generic"`).
+    /// Supported values: `default`, `tsserver` (TypeScript / Vue tsserver protocol).
+    #[serde(default)]
+    pub adapter: Option<String>,
     #[serde(default)]
     pub initialize_timeout_ms: Option<u64>,
     #[serde(default)]
@@ -137,6 +141,7 @@ pub struct ResolvedServerConfig {
     pub language_id: Option<String>,
     pub root_dir: PathBuf,
     pub workspace_folders: Vec<PathBuf>,
+    pub adapter: Option<String>,
     pub initialize_timeout_ms: Option<u64>,
     pub request_timeout_ms: Option<u64>,
     pub request_timeout_overrides_ms: HashMap<String, u64>,
@@ -343,6 +348,12 @@ fn resolve_server_config(
         })
         .collect::<Vec<_>>();
 
+    let adapter = server
+        .adapter
+        .clone()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
     ResolvedServerConfig {
         id,
         kind,
@@ -360,6 +371,7 @@ fn resolve_server_config(
             .filter(|s| !s.is_empty()),
         root_dir,
         workspace_folders,
+        adapter,
         initialize_timeout_ms: server.initialize_timeout_ms,
         request_timeout_ms: server.request_timeout_ms,
         request_timeout_overrides_ms: server
@@ -404,6 +416,7 @@ fn default_rust_analyzer_server(workspace_root: &Path) -> ResolvedServerConfig {
         language_id: Some("rust".to_string()),
         root_dir: workspace_root.to_path_buf(),
         workspace_folders: Vec::new(),
+        adapter: None,
         initialize_timeout_ms: None,
         request_timeout_ms: None,
         request_timeout_overrides_ms: HashMap::new(),
@@ -635,6 +648,24 @@ client_capabilities = { workspace = { configuration = true } }
     }
 
     #[test]
+    fn toml_parses_adapter() {
+        let toml = r#"
+[[servers]]
+id = "ts"
+kind = "generic"
+extensions = ["ts"]
+command = "typescript-language-server"
+args = ["--stdio"]
+language_id = "typescript"
+adapter = "tsserver"
+"#;
+
+        let config: LspiConfig = toml::from_str(toml).unwrap();
+        let server = config.servers.unwrap().into_iter().next().unwrap();
+        assert_eq!(server.adapter, Some("tsserver".to_string()));
+    }
+
+    #[test]
     fn json_parses_initialize_options_and_client_capabilities_aliases() {
         let json = r#"
 {
@@ -712,6 +743,7 @@ client_capabilities = { workspace = { configuration = true } }
                 language_id: None,
                 root_dir: root.clone(),
                 workspace_folders: Vec::new(),
+                adapter: None,
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 request_timeout_overrides_ms: HashMap::new(),
@@ -731,6 +763,7 @@ client_capabilities = { workspace = { configuration = true } }
                 language_id: None,
                 root_dir: nested.clone(),
                 workspace_folders: Vec::new(),
+                adapter: None,
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 request_timeout_overrides_ms: HashMap::new(),
@@ -767,6 +800,7 @@ client_capabilities = { workspace = { configuration = true } }
                 language_id: None,
                 root_dir: root.join("does-not-contain"),
                 workspace_folders: Vec::new(),
+                adapter: None,
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 request_timeout_overrides_ms: HashMap::new(),
@@ -786,6 +820,7 @@ client_capabilities = { workspace = { configuration = true } }
                 language_id: None,
                 root_dir: root.join("also-does-not-contain"),
                 workspace_folders: Vec::new(),
+                adapter: None,
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 request_timeout_overrides_ms: HashMap::new(),

@@ -456,11 +456,19 @@ impl LspiMcpServer {
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| guess_language_id_from_extensions(&server.extensions));
 
+        let adapter = server
+            .adapter
+            .as_deref()
+            .and_then(lspi_lsp::adapter_from_name)
+            .or_else(|| lspi_lsp::adapter_from_command(&command))
+            .unwrap_or_default();
+
         let client = lspi_lsp::GenericLspClient::start(lspi_lsp::GenericLspClientOptions {
             command,
             args,
             cwd: server.root_dir.clone(),
             workspace_folders: server.workspace_folders.clone(),
+            adapter,
             initialize_timeout,
             request_timeout,
             request_timeout_overrides,
@@ -576,11 +584,19 @@ impl LspiMcpServer {
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "python".to_string());
 
+        let adapter = server
+            .adapter
+            .as_deref()
+            .and_then(lspi_lsp::adapter_from_name)
+            .or_else(|| lspi_lsp::adapter_from_command(&command))
+            .unwrap_or_default();
+
         let client = lspi_lsp::GenericLspClient::start(lspi_lsp::GenericLspClientOptions {
             command,
             args,
             cwd: server.root_dir.clone(),
             workspace_folders: server.workspace_folders.clone(),
+            adapter,
             initialize_timeout,
             request_timeout,
             request_timeout_overrides,

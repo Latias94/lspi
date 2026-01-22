@@ -13,15 +13,10 @@ use tokio::time::{Duration, timeout};
 use tracing::{debug, warn};
 use url::Url;
 
+use crate::adapter::{LspAdapter, WorkspaceFolder};
+
 const MAX_LSP_MESSAGE_BYTES: usize = 20 * 1024 * 1024;
 const LSP_NO_PARAMS_METHODS: [&str; 2] = ["shutdown", "exit"];
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LspWorkspaceFolder {
-    pub uri: String,
-    pub name: String,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LspPosition {
@@ -199,6 +194,7 @@ pub struct LspClientOptions {
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub workspace_folders: Vec<PathBuf>,
+    pub adapter: LspAdapter,
     pub initialize_timeout: Duration,
     pub request_timeout: Duration,
     pub request_timeout_overrides: HashMap<String, Duration>,
@@ -224,7 +220,8 @@ pub struct LspClient {
     server_status_rx: watch::Receiver<Option<ServerStatus>>,
     initialized: Notify,
     root_uri: String,
-    workspace_folders: Arc<Vec<LspWorkspaceFolder>>,
+    workspace_folders: Arc<Vec<WorkspaceFolder>>,
+    adapter: LspAdapter,
     diagnostic_pull_supported: AtomicU8, // 0=unknown, 1=yes, 2=no
     default_request_timeout: Duration,
     request_timeout_overrides: Arc<HashMap<String, Duration>>,
@@ -263,9 +260,9 @@ impl LspClient {
             .map_err(|_| anyhow!("failed to build rootUri for {:?}", options.cwd))?
             .to_string();
 
-        let mut workspace_folders = Vec::<LspWorkspaceFolder>::new();
+        let mut workspace_folders = Vec::<WorkspaceFolder>::new();
         let mut seen = std::collections::HashSet::<String>::new();
-        workspace_folders.push(LspWorkspaceFolder {
+        workspace_folders.push(WorkspaceFolder {
             uri: root_uri.clone(),
             name: "workspace".to_string(),
         });
@@ -284,7 +281,7 @@ impl LspClient {
                 .map(|s| s.to_string())
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| "workspace".to_string());
-            workspace_folders.push(LspWorkspaceFolder { uri, name });
+            workspace_folders.push(WorkspaceFolder { uri, name });
         }
 
         let client = Self {
@@ -301,6 +298,7 @@ impl LspClient {
             initialized: Notify::new(),
             root_uri,
             workspace_folders: Arc::new(workspace_folders),
+            adapter: options.adapter,
             diagnostic_pull_supported: AtomicU8::new(0),
             default_request_timeout: options.request_timeout,
             request_timeout_overrides: Arc::new(options.request_timeout_overrides),
@@ -673,6 +671,7 @@ impl LspClient {
             server_status_tx: self.server_status_tx.clone(),
             diagnostics: self.diagnostics.clone(),
             diagnostics_notify: self.diagnostics_notify.clone(),
+            adapter: self.adapter.clone(),
         };
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
@@ -710,12 +709,23 @@ fn parse_document_diagnostic_report(value: Value) -> Result<Vec<LspDiagnostic>> 
 async fn handle_lsp_message(message: Value, ctx: &LspMessageContext) {
     if let Some(method) = message.get("method").and_then(|m| m.as_str()) {
         if let Some(id) = message.get("id").cloned() {
-            if let Some(result) = default_response_for_server_request(
-                method,
-                message.get("params"),
-                ctx.workspace_folders.as_ref(),
-                &ctx.workspace_configuration,
-            ) {
+            if let Some(result) = ctx
+                .adapter
+                .server_request_result(
+                    method,
+                    message.get("params"),
+                    ctx.workspace_folders.as_ref(),
+                    &ctx.workspace_configuration,
+                )
+                .or_else(|| {
+                    default_response_for_server_request(
+                        method,
+                        message.get("params"),
+                        ctx.workspace_folders.as_ref(),
+                        &ctx.workspace_configuration,
+                    )
+                })
+            {
                 let response = serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": id,
@@ -728,21 +738,12 @@ async fn handle_lsp_message(message: Value, ctx: &LspMessageContext) {
             return;
         }
 
-        if method == "tsserver/request" {
-            let Some(params) = message.get("params").and_then(|p| p.as_array()) else {
-                return;
-            };
-            let Some(id) = params.first().cloned() else {
-                return;
-            };
-
-            let response = serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "tsserver/response",
-                "params": [id, null]
-            });
+        if let Some(response) = ctx
+            .adapter
+            .server_notification_response(method, message.get("params"))
+        {
             if let Err(err) = write_message_to(&ctx.stdin, &response).await {
-                warn!("failed to write tsserver/response: {err:#}");
+                warn!("failed to write adapter response for notification {method}: {err:#}");
             }
             return;
         }
@@ -798,12 +799,13 @@ async fn handle_lsp_message(message: Value, ctx: &LspMessageContext) {
 #[derive(Clone)]
 struct LspMessageContext {
     stdin: Arc<Mutex<ChildStdin>>,
-    workspace_folders: Arc<Vec<LspWorkspaceFolder>>,
+    workspace_folders: Arc<Vec<WorkspaceFolder>>,
     workspace_configuration: Arc<HashMap<String, Value>>,
     state: Arc<Mutex<LspState>>,
     server_status_tx: watch::Sender<Option<ServerStatus>>,
     diagnostics: Arc<Mutex<HashMap<String, Vec<LspDiagnostic>>>>,
     diagnostics_notify: Arc<Notify>,
+    adapter: LspAdapter,
 }
 
 async fn write_message_to(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) -> Result<()> {
@@ -822,7 +824,7 @@ async fn write_message_to(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) -> Resu
 fn default_response_for_server_request(
     method: &str,
     params: Option<&Value>,
-    workspace_folders: &[LspWorkspaceFolder],
+    workspace_folders: &[WorkspaceFolder],
     workspace_configuration: &HashMap<String, Value>,
 ) -> Option<Value> {
     match method {
@@ -873,21 +875,6 @@ fn default_response_for_server_request(
             "applied": false,
             "failureReason": "lspi does not apply server-initiated workspace edits",
         })),
-        // vue-language-server sends custom client requests for TypeScript integration.
-        "tsserver/request" => {
-            let Some(arr) = params.and_then(|p| p.as_array()) else {
-                return Some(serde_json::json!([0, {}]));
-            };
-            let id = arr.first().cloned().unwrap_or(Value::Null);
-            let request_type = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
-            if request_type == "_vue:projectInfo" {
-                return Some(serde_json::json!([
-                    id,
-                    { "configFiles": [], "sourceFiles": [] }
-                ]));
-            }
-            Some(serde_json::json!([id, {}]))
-        }
         // Default: respond with null to avoid deadlocking servers that expect a response.
         other => {
             debug!("unhandled server request: {other}");
@@ -1056,7 +1043,7 @@ mod server_request_tests {
 
     #[test]
     fn workspace_folders_returns_root_uri() {
-        let folders = vec![LspWorkspaceFolder {
+        let folders = vec![WorkspaceFolder {
             uri: "file:///root".to_string(),
             name: "workspace".to_string(),
         }];
@@ -1076,17 +1063,23 @@ mod server_request_tests {
     #[test]
     fn vue_tsserver_request_project_info_returns_minimal_payload() {
         let params = serde_json::json!([42, "_vue:projectInfo", {}]);
-        let out = default_response_for_server_request(
-            "tsserver/request",
-            Some(&params),
-            &[],
-            &HashMap::new(),
-        )
-        .unwrap();
+        let out = LspAdapter::TsServerProtocol
+            .server_request_result("tsserver/request", Some(&params), &[], &HashMap::new())
+            .unwrap();
         assert_eq!(
             out,
             serde_json::json!([42, { "configFiles": [], "sourceFiles": [] }])
         );
+    }
+
+    #[test]
+    fn tsserver_notification_response_wraps_id() {
+        let params = serde_json::json!([42, "any", {}]);
+        let out = LspAdapter::TsServerProtocol
+            .server_notification_response("tsserver/request", Some(&params))
+            .unwrap();
+        assert_eq!(out["method"], serde_json::json!("tsserver/response"));
+        assert_eq!(out["params"], serde_json::json!([42, null]));
     }
 
     #[test]

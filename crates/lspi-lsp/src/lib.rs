@@ -1,3 +1,4 @@
+mod adapter;
 mod generic;
 mod lsp;
 mod omnisharp;
@@ -5,6 +6,7 @@ mod pyright;
 mod rust_analyzer;
 mod symbol;
 
+pub use adapter::{LspAdapter, WorkspaceFolder, adapter_from_command, adapter_from_name};
 pub use lsp::{LspDiagnostic, LspPosition, LspRange, LspTextEdit};
 
 pub use generic::{GenericLspClient, GenericLspClientOptions};

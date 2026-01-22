@@ -127,6 +127,7 @@ impl RustAnalyzerClient {
             args: options.args,
             cwd: options.cwd,
             workspace_folders: options.workspace_folders,
+            adapter: crate::adapter::LspAdapter::Default,
             initialize_timeout: options.initialize_timeout,
             request_timeout: options.request_timeout,
             request_timeout_overrides: options.request_timeout_overrides,
