@@ -13,6 +13,7 @@ This document provides copy-paste prompt snippets you can add to your project's 
   - Inspect diagnostics before/after changes
 - Workflow:
   1) Identify the target symbol (name + file, or file + position)
+  1.5) If tools fail unexpectedly, use `get_current_config` / `get_server_status` to confirm routing, workspace roots, and server health.
   2) Use definition/references to confirm the correct symbol
   2.5) Use hover / document symbols / workspace symbols to gather context if needed
   3) Preview rename first (`dry_run=true`), then apply if safe

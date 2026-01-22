@@ -378,6 +378,51 @@ pub(crate) fn tool_stop_server() -> Tool {
     )
 }
 
+pub(crate) fn tool_get_current_config() -> Tool {
+    Tool::new(
+        Cow::Borrowed("get_current_config"),
+        Cow::Borrowed("Show the currently loaded lspi configuration (redacts env values)."),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 },
+                "include_env": { "type": "boolean", "default": false }
+            },
+            "additionalProperties": false
+        }))),
+    )
+}
+
+pub(crate) fn tool_list_servers() -> Tool {
+    Tool::new(
+        Cow::Borrowed("list_servers"),
+        Cow::Borrowed("List configured language servers (from lspi config)."),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 },
+                "include_env": { "type": "boolean", "default": false }
+            },
+            "additionalProperties": false
+        }))),
+    )
+}
+
+pub(crate) fn tool_get_server_status() -> Tool {
+    Tool::new(
+        Cow::Borrowed("get_server_status"),
+        Cow::Borrowed("Show runtime status for configured language servers."),
+        Arc::new(schema(json!({
+            "type": "object",
+            "properties": {
+                "server_id": { "type": "string" },
+                "max_total_chars": { "type": "integer", "minimum": 10000, "default": 120000 }
+            },
+            "additionalProperties": false
+        }))),
+    )
+}
+
 fn schema(value: serde_json::Value) -> JsonObject {
     #[expect(clippy::expect_used)]
     serde_json::from_value(value).expect("tool schema should deserialize")

@@ -181,6 +181,10 @@ impl RustAnalyzerClient {
         }
     }
 
+    pub fn status_snapshot(&self) -> Option<ServerStatus> {
+        self.status_rx.borrow().clone()
+    }
+
     async fn document_symbols_with_retry(&self, file_path: &Path) -> Result<Vec<FlatSymbol>> {
         let mut last_err: Option<anyhow::Error> = None;
         let mut delay_ms = 200u64;

@@ -51,6 +51,9 @@ metadata:
 ## Tool cheat sheet
 
 - Read-only:
+  - `get_current_config`
+  - `list_servers`
+  - `get_server_status`
   - `hover_at`
   - `get_document_symbols`
   - `search_workspace_symbols`

@@ -4,6 +4,9 @@ use tracing::warn;
 pub(crate) fn all_tools() -> Vec<Tool> {
     use crate::tool_schemas as schemas;
     vec![
+        schemas::tool_get_current_config(),
+        schemas::tool_list_servers(),
+        schemas::tool_get_server_status(),
         schemas::tool_find_definition(),
         schemas::tool_find_definition_at(),
         schemas::tool_find_references(),

@@ -173,6 +173,12 @@ Common environment variables:
 
 ## MCP tools
 
+Session / introspection:
+
+- `get_current_config`
+- `list_servers`
+- `get_server_status`
+
 Read-only navigation:
 
 - `hover_at`

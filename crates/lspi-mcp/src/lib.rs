@@ -227,6 +227,9 @@ impl ServerHandler for LspiMcpServer {
         }
 
         match request.name.as_ref() {
+            "get_current_config" => self.get_current_config(request).await,
+            "list_servers" => self.list_servers(request).await,
+            "get_server_status" => self.get_server_status(request).await,
             "find_definition" => self.find_definition(request).await,
             "find_definition_at" => self.find_definition_at(request).await,
             "find_references" => self.find_references(request).await,
@@ -585,6 +588,30 @@ struct SearchWorkspaceSymbolsArgs {
 }
 
 #[derive(Debug, Deserialize)]
+struct GetCurrentConfigArgs {
+    #[serde(default)]
+    max_total_chars: Option<usize>,
+    #[serde(default)]
+    include_env: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListServersArgs {
+    #[serde(default)]
+    max_total_chars: Option<usize>,
+    #[serde(default)]
+    include_env: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetServerStatusArgs {
+    #[serde(default)]
+    server_id: Option<String>,
+    #[serde(default)]
+    max_total_chars: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 struct GetDiagnosticsArgs {
     file_path: String,
     #[serde(default)]
@@ -908,9 +935,7 @@ mod apply_workspace_edit_tests {
 fn parse_arguments<T: for<'de> Deserialize<'de>>(
     arguments: Option<JsonObject>,
 ) -> Result<T, McpError> {
-    let Some(arguments) = arguments else {
-        return Err(McpError::invalid_params("missing tool arguments", None));
-    };
+    let arguments = arguments.unwrap_or_default();
     serde_json::from_value::<T>(Value::Object(arguments.into_iter().collect()))
         .map_err(|e| McpError::invalid_params(e.to_string(), None))
 }
