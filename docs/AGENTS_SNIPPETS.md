@@ -55,6 +55,7 @@ You can paste the following into your project's `AGENTS.md`:
   - 有光标/位置时优先用 `*_at`（内部有有限度的位置模糊，鲁棒性更好）。
   - 若配置了多个语言服务器，`search_workspace_symbols` 需要提供 `file_path` 用于选择正确的 server。
   - 对结果数量可能很大的工具（尤其 references），请显式设置 `max_results` / `max_total_chars`，必要时关闭代码片段 `include_snippet=false`。
+  - 每次工具调用后，输出一个极简“工具调用小结”（调用的工具名/关键入参/结果条数/是否截断），方便追溯。
 - 常用工具：
   - find_definition / find_definition_at
   - find_references / find_references_at

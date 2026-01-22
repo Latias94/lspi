@@ -62,6 +62,21 @@ Notes:
 
 For more details, see `docs/CODEX.md`.
 
+## Troubleshooting (common issues)
+
+- “No server found for extension …”:
+  - Add/verify `servers[].extensions`, and ensure `file_path` matches the intended language server.
+- Language server not starting / command not found:
+  - Install the language server, or set `servers[].command` / the corresponding `LSPI_*_COMMAND` env var.
+  - Run `lspi doctor --workspace-root .` for actionable hints.
+- Off-by-one line/column:
+  - Prefer `*_at` tools (they use bounded position fuzzing).
+- Large outputs / truncated results:
+  - Set `max_results` / `max_total_chars`, and consider `include_snippet=false` for large reference sets.
+- TypeScript/Vue returns empty/odd results:
+  - Configure `servers[].workspace_configuration` and/or tune `initialize_options` / `client_capabilities`.
+  - Consider `servers[].adapter = "tsserver"` when using TypeScript/Vue tooling.
+
 ## Language server support
 
 `lspi` does not bundle language servers.
