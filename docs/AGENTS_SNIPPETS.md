@@ -14,6 +14,7 @@ This document provides copy-paste prompt snippets you can add to your project's 
 - Workflow:
   1) Identify the target symbol (name + file, or file + position)
   1.5) If tools fail unexpectedly, inspect `structuredContent.next_steps` and/or use `get_current_config` / `get_server_status` to confirm routing, workspace roots, and server health.
+  1.6) If you can run local commands, prefer `lspi doctor --workspace-root . --json` for a machine-readable report (useful for agents).
   2) Use definition/references to confirm the correct symbol
   2.5) Use hover / document symbols / workspace symbols to gather context if needed
   3) Preview rename first (`dry_run=true`), then apply if safe
