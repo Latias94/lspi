@@ -14,6 +14,7 @@ With `lspi`, your agent can:
 
 - Jump to definitions, implementations, type definitions, and references
 - Inspect hover/type information at a cursor position
+- Use `*_at` tools with bounded position fuzzing (helps when the agent is off-by-one on line/column counting)
 - Perform preview-first, workspace-wide renames safely
 - Query call hierarchy (incoming/outgoing calls) when supported by the language server
 
@@ -78,11 +79,57 @@ In practice, most “standard” language servers work well in generic mode (Go 
 TypeScript/Vue tooling tends to be more quirky; `lspi` includes a small adapter layer for server-specific behavior
 (see `servers[].adapter`, currently `tsserver`).
 
+## FAQ
+
+### Do I need to install language servers?
+
+Yes. `lspi` does not bundle any language servers. Install the servers you need and point `lspi` at them via config.
+Use `lspi doctor --workspace-root .` to validate your setup.
+
+### Are Go / TypeScript supported?
+
+Yes, via `kind = "generic"` (provided the LSP server speaks JSON-RPC over stdio).
+In practice:
+
+- Go (`gopls`) usually works well in generic mode.
+- TypeScript/Vue often needs extra tuning (runtime `workspace/configuration`, and sometimes `servers[].adapter = "tsserver"`).
+
+### How does multi-root work?
+
+Configure additional roots with `servers[].workspace_folders`. If you configure multiple LSP servers, tools like
+`search_workspace_symbols` should include `file_path` so `lspi` can route to the right server.
+
+### Will `lspi` modify my files automatically?
+
+No. Rename tools default to preview mode (`dry_run=true`), and you must explicitly request applying edits (`dry_run=false`).
+
 ## Configuration (what you will actually tweak)
 
 Full schema and discovery order:
 
 - `docs/CONFIG.md`
+
+### Minimal `.lspi/config.toml` example
+
+```toml
+[[servers]]
+id = "rust-analyzer"
+kind = "rust_analyzer"
+extensions = ["rs"]
+
+[[servers]]
+id = "ts"
+kind = "generic"
+extensions = ["ts", "tsx", "js", "jsx", "vue"]
+language_id = "typescript"
+command = "typescript-language-server"
+args = ["--stdio"]
+adapter = "tsserver"
+
+# Optional (sometimes needed for TypeScript tooling):
+# [servers.workspace_configuration]
+# formattingOptions = { tabSize = 2, insertSpaces = true }
+```
 
 Common knobs (per server):
 
