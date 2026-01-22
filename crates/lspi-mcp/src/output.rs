@@ -57,6 +57,8 @@ pub(crate) fn enforce_global_output_caps(
         return;
     };
 
+    let total_estimate = capture_truncation_counts(tool.as_str(), payload);
+
     if json_len(payload) <= max_total_chars {
         return;
     }
@@ -163,6 +165,27 @@ pub(crate) fn enforce_global_output_caps(
         if let Some(obj) = payload.as_object_mut() {
             obj.insert("results".to_string(), Value::Array(Vec::new()));
             obj.insert("diagnostics".to_string(), Value::Array(Vec::new()));
+            match tool.as_str() {
+                "get_diagnostics" => {
+                    obj.insert(
+                        "count".to_string(),
+                        Value::Number(serde_json::Number::from(0)),
+                    );
+                }
+                "find_definition" => {
+                    obj.insert(
+                        "definition_locations".to_string(),
+                        Value::Number(serde_json::Number::from(0)),
+                    );
+                }
+                "find_references" => {
+                    obj.insert(
+                        "reference_locations".to_string(),
+                        Value::Number(serde_json::Number::from(0)),
+                    );
+                }
+                _ => {}
+            }
         }
         warnings.push(json!({
             "kind": "global_cap_cleared_results",
@@ -172,9 +195,60 @@ pub(crate) fn enforce_global_output_caps(
         changed = true;
     }
 
+    let returned_results = if changed {
+        capture_truncation_counts(tool.as_str(), payload)
+    } else {
+        None
+    };
+
     if changed && let Some(obj) = payload.as_object_mut() {
         obj.insert("warnings".to_string(), Value::Array(warnings));
         obj.insert("truncated".to_string(), Value::Bool(true));
+        if let Some(total_estimate) = total_estimate {
+            obj.insert("total_estimate".to_string(), total_estimate);
+        }
+        if let Some(returned_results) = returned_results {
+            obj.insert("returned_results".to_string(), returned_results);
+        }
+    }
+}
+
+fn capture_truncation_counts(tool: &str, payload: &Value) -> Option<Value> {
+    match tool {
+        "get_diagnostics" => {
+            let count = payload.get("count").and_then(|v| v.as_u64()).or_else(|| {
+                payload
+                    .get("diagnostics")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len() as u64)
+            })?;
+            Some(json!({ "count": count }))
+        }
+        "find_definition" => {
+            let count = payload
+                .get("definition_locations")
+                .and_then(|v| v.as_u64())
+                .or_else(|| {
+                    payload
+                        .get("results")
+                        .and_then(|v| v.as_array())
+                        .map(|results| count_locations(results.as_slice()) as u64)
+                })?;
+            Some(json!({ "definition_locations": count }))
+        }
+        "find_references" => {
+            let count = payload
+                .get("reference_locations")
+                .and_then(|v| v.as_u64())
+                .or_else(|| {
+                    payload
+                        .get("results")
+                        .and_then(|v| v.as_array())
+                        .map(|results| count_locations(results.as_slice()) as u64)
+                })?;
+            Some(json!({ "reference_locations": count }))
+        }
+        _ => None,
     }
 }
 
@@ -277,5 +351,37 @@ mod output_caps_tests {
         // Ensure snippet keys are removed
         let defs = payload["results"][0]["definitions"].as_array().unwrap();
         assert!(defs.iter().all(|d| d.get("snippet").is_none()));
+
+        // Truncation metadata for clients.
+        let returned = payload["returned_results"]["definition_locations"]
+            .as_u64()
+            .unwrap();
+        let total = payload["total_estimate"]["definition_locations"]
+            .as_u64()
+            .unwrap();
+        assert!(returned <= total);
+    }
+
+    #[test]
+    fn diagnostics_truncation_sets_returned_and_total() {
+        let mut payload = json!({
+            "ok": true,
+            "tool": "get_diagnostics",
+            "count": 200,
+            "diagnostics": (0..200).map(|i| json!({"message": format!("d{i}")})).collect::<Vec<_>>(),
+            "warnings": [],
+            "truncated": false
+        });
+
+        enforce_global_output_caps(1500, false, &mut payload);
+        assert_eq!(payload.get("truncated"), Some(&Value::Bool(true)));
+        let returned = payload["returned_results"]["count"].as_u64().unwrap();
+        let total = payload["total_estimate"]["count"].as_u64().unwrap();
+        assert!(returned <= total);
+        assert_eq!(returned, payload["count"].as_u64().unwrap());
+        assert_eq!(
+            returned as usize,
+            payload["diagnostics"].as_array().unwrap().len()
+        );
     }
 }
