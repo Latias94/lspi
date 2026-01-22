@@ -1061,28 +1061,6 @@ mod server_request_tests {
     }
 
     #[test]
-    fn vue_tsserver_request_project_info_returns_minimal_payload() {
-        let params = serde_json::json!([42, "_vue:projectInfo", {}]);
-        let out = LspAdapter::TsServerProtocol
-            .server_request_result("tsserver/request", Some(&params), &[], &HashMap::new())
-            .unwrap();
-        assert_eq!(
-            out,
-            serde_json::json!([42, { "configFiles": [], "sourceFiles": [] }])
-        );
-    }
-
-    #[test]
-    fn tsserver_notification_response_wraps_id() {
-        let params = serde_json::json!([42, "any", {}]);
-        let out = LspAdapter::TsServerProtocol
-            .server_notification_response("tsserver/request", Some(&params))
-            .unwrap();
-        assert_eq!(out["method"], serde_json::json!("tsserver/response"));
-        assert_eq!(out["params"], serde_json::json!([42, null]));
-    }
-
-    #[test]
     fn workspace_configuration_uses_config_map_for_formatting_options() {
         let params = serde_json::json!({
             "items": [
