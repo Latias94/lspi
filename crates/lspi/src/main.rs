@@ -50,6 +50,9 @@ enum Command {
         /// Start language servers eagerly (reduces first-tool-call latency)
         #[arg(long)]
         warmup: bool,
+        /// Convenience mode preset (sugar for context + read-only/read-write defaults)
+        #[arg(long)]
+        mode: Option<McpMode>,
         /// Context preset (e.g. "codex", "navigation", "full")
         #[arg(long)]
         context: Option<String>,
@@ -125,6 +128,14 @@ enum SkillInstallScope {
     Repo,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum McpMode {
+    /// Safe navigation defaults (read-only; smaller output caps)
+    Navigation,
+    /// Refactor session defaults (read-write; normal output caps)
+    Refactor,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -137,10 +148,28 @@ async fn main() -> Result<()> {
             config,
             workspace_root,
             warmup,
-            context,
-            read_only,
-            read_write,
+            mode,
+            mut context,
+            mut read_only,
+            mut read_write,
         } => {
+            if let Some(mode) = mode {
+                if context.is_none() {
+                    context = Some(match mode {
+                        McpMode::Navigation => "navigation".to_string(),
+                        McpMode::Refactor => "full".to_string(),
+                    });
+                }
+
+                // Only apply mode defaults when the user didn't explicitly pick read-only/read-write.
+                if !read_only && !read_write {
+                    match mode {
+                        McpMode::Navigation => read_only = true,
+                        McpMode::Refactor => read_write = true,
+                    }
+                }
+            }
+
             lspi_mcp::run_stdio_with_options(lspi_mcp::McpOptions {
                 config_path: config,
                 workspace_root,

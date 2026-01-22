@@ -38,6 +38,7 @@ context = "codex"
 Notes:
 
 - `context="codex"` and `context="navigation"` default to `mcp.read_only=true` unless you set `mcp.read_only=false` or run `lspi mcp --read-write`.
+- CLI sugar: use `lspi mcp --mode navigation|refactor` to set sensible `context` + read-only/read-write defaults.
 
 ### `servers` (recommended)
 

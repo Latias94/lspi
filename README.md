@@ -61,6 +61,7 @@ Notes:
 - Optional: add `--warmup` to start language servers eagerly (reduces first-tool-call latency).
 - Optional: add `--read-only` (or set `mcp.read_only=true`) to expose a navigation-only toolset.
 - Optional: add `--context codex` for safe defaults (read-only + smaller output limits). Use `--read-write` to opt back into rename/control tools.
+- Optional: add `--mode navigation` (sugar for safe read-only defaults) or `--mode refactor` (sugar for read-write defaults).
 
 For more details, see `docs/CODEX.md`.
 
