@@ -44,6 +44,11 @@ pub struct LspServerConfig {
     #[serde(default)]
     #[serde(alias = "rootDir")]
     pub root_dir: Option<PathBuf>,
+    /// Optional additional workspace folders to include in the LSP `initialize` request.
+    /// Paths can be absolute or relative to `workspace_root`.
+    #[serde(default)]
+    #[serde(alias = "workspaceFolders")]
+    pub workspace_folders: Option<Vec<PathBuf>>,
     #[serde(default)]
     pub initialize_timeout_ms: Option<u64>,
     #[serde(default)]
@@ -131,6 +136,7 @@ pub struct ResolvedServerConfig {
     pub extensions: Vec<String>,
     pub language_id: Option<String>,
     pub root_dir: PathBuf,
+    pub workspace_folders: Vec<PathBuf>,
     pub initialize_timeout_ms: Option<u64>,
     pub request_timeout_ms: Option<u64>,
     pub request_timeout_overrides_ms: HashMap<String, u64>,
@@ -322,6 +328,20 @@ fn resolve_server_config(
         .collect::<Vec<_>>();
 
     let root_dir = resolve_root_dir(workspace_root, server.root_dir.as_deref());
+    let workspace_folders = server
+        .workspace_folders
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                workspace_root.join(p)
+            }
+        })
+        .collect::<Vec<_>>();
 
     ResolvedServerConfig {
         id,
@@ -339,6 +359,7 @@ fn resolve_server_config(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
         root_dir,
+        workspace_folders,
         initialize_timeout_ms: server.initialize_timeout_ms,
         request_timeout_ms: server.request_timeout_ms,
         request_timeout_overrides_ms: server
@@ -382,6 +403,7 @@ fn default_rust_analyzer_server(workspace_root: &Path) -> ResolvedServerConfig {
         extensions: vec!["rs".to_string()],
         language_id: Some("rust".to_string()),
         root_dir: workspace_root.to_path_buf(),
+        workspace_folders: Vec::new(),
         initialize_timeout_ms: None,
         request_timeout_ms: None,
         request_timeout_overrides_ms: HashMap::new(),
@@ -650,6 +672,31 @@ client_capabilities = { workspace = { configuration = true } }
     }
 
     #[test]
+    fn json_parses_workspace_folders_alias() {
+        let json = r#"
+{
+  "servers": [
+    {
+      "id": "ts",
+      "kind": "generic",
+      "extensions": ["ts"],
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "languageId": "typescript",
+      "workspaceFolders": ["apps/web", "packages/shared"]
+    }
+  ]
+}
+"#;
+
+        let config: LspiConfig = serde_json::from_str(json).unwrap();
+        let server = config.servers.unwrap().into_iter().next().unwrap();
+        let folders = server.workspace_folders.unwrap();
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[0], PathBuf::from("apps/web"));
+    }
+
+    #[test]
     fn route_server_by_path_prefers_longest_root_dir_match() {
         let root = temp_root("route-longest");
         let nested = root.join("nested");
@@ -664,6 +711,7 @@ client_capabilities = { workspace = { configuration = true } }
                 extensions: vec!["rs".to_string()],
                 language_id: None,
                 root_dir: root.clone(),
+                workspace_folders: Vec::new(),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 request_timeout_overrides_ms: HashMap::new(),
@@ -682,6 +730,7 @@ client_capabilities = { workspace = { configuration = true } }
                 extensions: vec!["rs".to_string()],
                 language_id: None,
                 root_dir: nested.clone(),
+                workspace_folders: Vec::new(),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 request_timeout_overrides_ms: HashMap::new(),
@@ -717,6 +766,7 @@ client_capabilities = { workspace = { configuration = true } }
                 extensions: vec!["rs".to_string()],
                 language_id: None,
                 root_dir: root.join("does-not-contain"),
+                workspace_folders: Vec::new(),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 request_timeout_overrides_ms: HashMap::new(),
@@ -735,6 +785,7 @@ client_capabilities = { workspace = { configuration = true } }
                 extensions: vec!["rs".to_string()],
                 language_id: None,
                 root_dir: root.join("also-does-not-contain"),
+                workspace_folders: Vec::new(),
                 initialize_timeout_ms: None,
                 request_timeout_ms: None,
                 request_timeout_overrides_ms: HashMap::new(),

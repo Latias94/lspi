@@ -26,6 +26,7 @@ id = "rust-analyzer"               # optional but recommended
 kind = "rust_analyzer"             # required (supported: rust_analyzer, omnisharp, generic, pyright, basedpyright)
 extensions = ["rs"]                # required (no leading dots)
 # root_dir = "."                   # optional; absolute or relative to workspace_root
+# workspace_folders = []           # optional; extra workspace folders (absolute or relative to workspace_root)
 # command = "rust-analyzer"        # optional; defaults to auto-resolve
 # args = []                        # optional
 # language_id = "rust"             # optional; used by kind="generic" (best-effort default from extension)

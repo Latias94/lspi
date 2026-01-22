@@ -17,6 +17,13 @@ const MAX_LSP_MESSAGE_BYTES: usize = 20 * 1024 * 1024;
 const LSP_NO_PARAMS_METHODS: [&str; 2] = ["shutdown", "exit"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspWorkspaceFolder {
+    pub uri: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LspPosition {
     pub line: u32,
     pub character: u32,
@@ -191,6 +198,7 @@ pub struct LspClientOptions {
     pub command: String,
     pub args: Vec<String>,
     pub cwd: PathBuf,
+    pub workspace_folders: Vec<PathBuf>,
     pub initialize_timeout: Duration,
     pub request_timeout: Duration,
     pub request_timeout_overrides: HashMap<String, Duration>,
@@ -216,6 +224,7 @@ pub struct LspClient {
     server_status_rx: watch::Receiver<Option<ServerStatus>>,
     initialized: Notify,
     root_uri: String,
+    workspace_folders: Arc<Vec<LspWorkspaceFolder>>,
     diagnostic_pull_supported: AtomicU8, // 0=unknown, 1=yes, 2=no
     default_request_timeout: Duration,
     request_timeout_overrides: Arc<HashMap<String, Duration>>,
@@ -250,6 +259,34 @@ impl LspClient {
             .ok_or_else(|| anyhow!("failed to capture LSP stderr"))?;
 
         let (server_status_tx, server_status_rx) = watch::channel(None);
+        let root_uri = Url::from_directory_path(&options.cwd)
+            .map_err(|_| anyhow!("failed to build rootUri for {:?}", options.cwd))?
+            .to_string();
+
+        let mut workspace_folders = Vec::<LspWorkspaceFolder>::new();
+        let mut seen = std::collections::HashSet::<String>::new();
+        workspace_folders.push(LspWorkspaceFolder {
+            uri: root_uri.clone(),
+            name: "workspace".to_string(),
+        });
+        seen.insert(root_uri.clone());
+
+        for folder in options.workspace_folders.iter() {
+            let uri = Url::from_directory_path(folder)
+                .map_err(|_| anyhow!("failed to build workspaceFolder URI for {:?}", folder))?
+                .to_string();
+            if !seen.insert(uri.clone()) {
+                continue;
+            }
+            let name = folder
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "workspace".to_string());
+            workspace_folders.push(LspWorkspaceFolder { uri, name });
+        }
+
         let client = Self {
             stdin: Arc::new(Mutex::new(stdin)),
             state: Arc::new(Mutex::new(LspState {
@@ -262,9 +299,8 @@ impl LspClient {
             server_status_tx,
             server_status_rx,
             initialized: Notify::new(),
-            root_uri: Url::from_directory_path(&options.cwd)
-                .map_err(|_| anyhow!("failed to build rootUri for {:?}", options.cwd))?
-                .to_string(),
+            root_uri,
+            workspace_folders: Arc::new(workspace_folders),
             diagnostic_pull_supported: AtomicU8::new(0),
             default_request_timeout: options.request_timeout,
             request_timeout_overrides: Arc::new(options.request_timeout_overrides),
@@ -600,9 +636,7 @@ impl LspClient {
             "processId": self.child.id(),
             "rootUri": self.root_uri,
             "capabilities": client_capabilities.cloned().unwrap_or(default_capabilities),
-            "workspaceFolders": [
-                { "uri": self.root_uri, "name": "workspace" }
-            ]
+            "workspaceFolders": self.workspace_folders.as_ref()
         });
 
         if let Some(v) = initialize_options
@@ -633,7 +667,7 @@ impl LspClient {
     fn spawn_stdout_reader(&self, stdout: ChildStdout) {
         let ctx = LspMessageContext {
             stdin: self.stdin.clone(),
-            root_uri: self.root_uri.clone(),
+            workspace_folders: self.workspace_folders.clone(),
             workspace_configuration: self.workspace_configuration.clone(),
             state: self.state.clone(),
             server_status_tx: self.server_status_tx.clone(),
@@ -679,7 +713,7 @@ async fn handle_lsp_message(message: Value, ctx: &LspMessageContext) {
             if let Some(result) = default_response_for_server_request(
                 method,
                 message.get("params"),
-                &ctx.root_uri,
+                ctx.workspace_folders.as_ref(),
                 &ctx.workspace_configuration,
             ) {
                 let response = serde_json::json!({
@@ -764,7 +798,7 @@ async fn handle_lsp_message(message: Value, ctx: &LspMessageContext) {
 #[derive(Clone)]
 struct LspMessageContext {
     stdin: Arc<Mutex<ChildStdin>>,
-    root_uri: String,
+    workspace_folders: Arc<Vec<LspWorkspaceFolder>>,
     workspace_configuration: Arc<HashMap<String, Value>>,
     state: Arc<Mutex<LspState>>,
     server_status_tx: watch::Sender<Option<ServerStatus>>,
@@ -788,7 +822,7 @@ async fn write_message_to(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) -> Resu
 fn default_response_for_server_request(
     method: &str,
     params: Option<&Value>,
-    root_uri: &str,
+    workspace_folders: &[LspWorkspaceFolder],
     workspace_configuration: &HashMap<String, Value>,
 ) -> Option<Value> {
     match method {
@@ -829,10 +863,9 @@ fn default_response_for_server_request(
 
             Some(Value::Array(out))
         }
-        "workspace/workspaceFolders" => Some(serde_json::json!([{
-            "uri": root_uri,
-            "name": "workspace"
-        }])),
+        "workspace/workspaceFolders" => {
+            Some(serde_json::to_value(workspace_folders).unwrap_or(Value::Null))
+        }
         "client/registerCapability" | "client/unregisterCapability" => Some(Value::Null),
         "window/workDoneProgress/create" => Some(Value::Null),
         "window/showMessageRequest" => Some(Value::Null),
@@ -1014,7 +1047,7 @@ mod server_request_tests {
         let out = default_response_for_server_request(
             "workspace/configuration",
             Some(&params),
-            "file:///root",
+            &[],
             &HashMap::new(),
         )
         .unwrap();
@@ -1023,10 +1056,14 @@ mod server_request_tests {
 
     #[test]
     fn workspace_folders_returns_root_uri() {
+        let folders = vec![LspWorkspaceFolder {
+            uri: "file:///root".to_string(),
+            name: "workspace".to_string(),
+        }];
         let out = default_response_for_server_request(
             "workspace/workspaceFolders",
             None,
-            "file:///root",
+            &folders,
             &HashMap::new(),
         )
         .unwrap();
@@ -1042,7 +1079,7 @@ mod server_request_tests {
         let out = default_response_for_server_request(
             "tsserver/request",
             Some(&params),
-            "file:///root",
+            &[],
             &HashMap::new(),
         )
         .unwrap();
@@ -1067,7 +1104,7 @@ mod server_request_tests {
         let out = default_response_for_server_request(
             "workspace/configuration",
             Some(&params),
-            "file:///root",
+            &[],
             &map,
         )
         .unwrap();
