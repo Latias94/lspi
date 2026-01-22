@@ -422,14 +422,12 @@ fn apply_mcp_context_defaults(context: Option<&str>, config: &mut lspi_core::con
         return;
     };
 
-    config
-        .mcp
-        .get_or_insert_with(|| lspi_core::config::McpConfig {
-            context: None,
-            read_only: None,
-            output: None,
-            tools: None,
-        });
+    config.mcp.get_or_insert(lspi_core::config::McpConfig {
+        context: None,
+        read_only: None,
+        output: None,
+        tools: None,
+    });
 
     let mcp = config.mcp.as_mut().unwrap();
 
@@ -446,7 +444,7 @@ fn apply_mcp_context_defaults(context: Option<&str>, config: &mut lspi_core::con
     // Output defaults: keep Codex outputs smaller by default.
     let output = mcp
         .output
-        .get_or_insert_with(|| lspi_core::config::McpOutputConfig {
+        .get_or_insert(lspi_core::config::McpOutputConfig {
             max_total_chars_default: None,
             max_total_chars_hard: None,
         });
@@ -475,13 +473,15 @@ mod mcp_context_tests {
 
     #[test]
     fn explicit_read_only_is_not_overridden_by_context() {
-        let mut cfg = lspi_core::config::LspiConfig::default();
-        cfg.mcp = Some(lspi_core::config::McpConfig {
-            context: Some("codex".to_string()),
-            read_only: Some(false),
-            output: None,
-            tools: None,
-        });
+        let mut cfg = lspi_core::config::LspiConfig {
+            mcp: Some(lspi_core::config::McpConfig {
+                context: Some("codex".to_string()),
+                read_only: Some(false),
+                output: None,
+                tools: None,
+            }),
+            ..Default::default()
+        };
         let ctx = cfg
             .mcp
             .as_ref()

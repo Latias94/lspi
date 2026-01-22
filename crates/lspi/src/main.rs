@@ -571,39 +571,37 @@ async fn run_doctor(
                         );
                     }
                 }
-            } else if is_pyright_kind(&s.kind) {
-                if let Err(err) = lspi_lsp::preflight_pyright(command).await {
-                    preflight.ok = false;
-                    preflight
-                        .errors
-                        .push(format!("pyright preflight failed: {err:#}"));
-                    preflight.hints.push(
-                        "Install Pyright (e.g. `npm i -g pyright`) and ensure `pyright-langserver` is on PATH."
-                            .to_string(),
-                    );
-                    preflight.hints.push(
-                        "Or set LSPI_PYRIGHT_COMMAND / LSPI_BASEDPYRIGHT_COMMAND, or servers[].command explicitly."
-                            .to_string(),
-                    );
-                    failures.push(format!("pyright preflight failed for server id={}", s.id));
-                }
+            } else if is_pyright_kind(&s.kind)
+                && let Err(err) = lspi_lsp::preflight_pyright(command).await
+            {
+                preflight.ok = false;
+                preflight
+                    .errors
+                    .push(format!("pyright preflight failed: {err:#}"));
+                preflight.hints.push(
+                    "Install Pyright (e.g. `npm i -g pyright`) and ensure `pyright-langserver` is on PATH."
+                        .to_string(),
+                );
+                preflight.hints.push(
+                    "Or set LSPI_PYRIGHT_COMMAND / LSPI_BASEDPYRIGHT_COMMAND, or servers[].command explicitly."
+                        .to_string(),
+                );
+                failures.push(format!("pyright preflight failed for server id={}", s.id));
             }
         }
 
-        if try_version {
-            if let Some(command) = resolved_command.as_deref() {
-                let output = TokioCommand::new(command).arg("--version").output().await;
-                if let Ok(output) = output {
-                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    preflight.version = if !stdout.is_empty() {
-                        Some(stdout)
-                    } else if !stderr.is_empty() {
-                        Some(stderr)
-                    } else {
-                        None
-                    };
-                }
+        if try_version && let Some(command) = resolved_command.as_deref() {
+            let output = TokioCommand::new(command).arg("--version").output().await;
+            if let Ok(output) = output {
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                preflight.version = if !stdout.is_empty() {
+                    Some(stdout)
+                } else if !stderr.is_empty() {
+                    Some(stderr)
+                } else {
+                    None
+                };
             }
         }
 

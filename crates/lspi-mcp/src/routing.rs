@@ -785,29 +785,6 @@ fn should_restart(
     now.duration_since(started_at) >= Duration::from_secs(minutes.saturating_mul(60))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn guess_language_id_includes_vue() {
-        assert_eq!(
-            guess_language_id_from_extensions(&["vue".to_string()]),
-            "vue"
-        );
-    }
-
-    #[test]
-    fn tsserver_adapter_has_sensible_default_timeouts() {
-        let adapter = lspi_lsp::LspAdapter::TsServerProtocol;
-        let ms = adapter_default_request_timeout_overrides_ms(&adapter);
-        assert!(ms.get("textDocument/documentSymbol").copied().unwrap_or(0) >= 60_000);
-        assert!(ms.get("textDocument/definition").copied().unwrap_or(0) >= 45_000);
-        assert!(ms.get("textDocument/references").copied().unwrap_or(0) >= 45_000);
-        assert!(ms.get("textDocument/rename").copied().unwrap_or(0) >= 45_000);
-    }
-}
-
 async fn shutdown_rust_analyzer_arc(
     mut arc: Arc<lspi_lsp::RustAnalyzerClient>,
 ) -> std::result::Result<(), Arc<lspi_lsp::RustAnalyzerClient>> {
@@ -931,5 +908,28 @@ pub(crate) async fn shutdown_generic_managed(
             started_at,
             last_used,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guess_language_id_includes_vue() {
+        assert_eq!(
+            guess_language_id_from_extensions(&["vue".to_string()]),
+            "vue"
+        );
+    }
+
+    #[test]
+    fn tsserver_adapter_has_sensible_default_timeouts() {
+        let adapter = lspi_lsp::LspAdapter::TsServerProtocol;
+        let ms = adapter_default_request_timeout_overrides_ms(&adapter);
+        assert!(ms.get("textDocument/documentSymbol").copied().unwrap_or(0) >= 60_000);
+        assert!(ms.get("textDocument/definition").copied().unwrap_or(0) >= 45_000);
+        assert!(ms.get("textDocument/references").copied().unwrap_or(0) >= 45_000);
+        assert!(ms.get("textDocument/rename").copied().unwrap_or(0) >= 45_000);
     }
 }
