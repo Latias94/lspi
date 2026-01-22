@@ -21,6 +21,7 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 - `lspi doctor`: add Pyright preflight hints (`kind=pyright|basedpyright`).
 - Build: relax dependency version specifiers and upgrade `rmcp` to `0.13`.
 - Repo hygiene: ignore IntelliJ project files (`.idea/`, `*.iml`).
+- Docs: redesign `README.md` to focus on MCP-first usage and include upstream inspirations.
 
 ### Added
 

@@ -2,64 +2,49 @@
 
 Giving AI the sight of LSP.
 
-`lspi` bridges **Language Server Protocol (LSP)** capabilities to **AI coding CLIs** (starting with Codex) via an **MCP server** over stdio.
+`lspi` is an **MCP server** that bridges **Language Server Protocol (LSP)** features (definition/references/rename/diagnostics, etc.)
+to **AI coding CLIs** (starting with Codex) over **stdio**.
 
-## What it does
+If your agent keeps doing grep-like searches or fragile string edits, `lspi` gives it IDE-grade, symbol-aware tooling.
 
-- Instant symbol navigation (definition/references/hover)
-- Safe rename with preview-first edits (`dry_run=true` by default)
-- Language-server lifecycle controls (restart/stop)
-- Multi-server routing by file extension + root directory
+## Why lspi
 
-## Supported language servers
+AI assistants are good at reasoning, but they usually lack reliable access to symbol relationships in a real codebase.
+With `lspi`, your agent can:
 
-`lspi` does not bundle language servers. Install the servers you need and configure them in `lspi` config.
-For any LSP that speaks JSON-RPC over stdio, use `kind = "generic"`.
+- Jump to definitions, implementations, type definitions, and references
+- Inspect hover/type information at a cursor position
+- Perform preview-first, workspace-wide renames safely
+- Query call hierarchy (incoming/outgoing calls) when supported by the language server
 
-Known-good setups (examples and smoke tests are included in this repo):
+## How it works
 
-- Rust: `rust-analyzer`
-- C#: OmniSharp in LSP mode (`omnisharp -lsp`)
-- TypeScript: `typescript-language-server`
-- Go: `gopls`
-- Python: `pyright-langserver`
-- Lua: `lua-language-server`
-- C++: `clangd`
+- You run `lspi mcp` as a stdio MCP server.
+- `lspi` starts and manages one or more LSP servers (your choice) and routes requests by file path / extension.
+- Tool results are returned as **structured** MCP responses, with output caps to keep results deterministic.
 
-## Install
+## Quickstart (Codex)
 
-Prerequisites:
-
-- Rust toolchain (stable)
-
-Install `lspi` from source:
+1) Install `lspi` (one-time):
 
 ```bash
 cargo install --path crates/lspi --locked
 ```
 
-Verify:
-
-```bash
-lspi --version
-```
-
-## Quickstart (Codex)
-
-1) Generate a project config (recommended):
+2) Create a per-project `lspi` config (recommended):
 
 ```bash
 cd /path/to/project
 lspi setup --wizard --non-interactive --write
 ```
 
-2) Check dependencies:
+3) Verify language server availability:
 
 ```bash
 lspi doctor --workspace-root .
 ```
 
-3) Configure Codex MCP (`~/.codex/config.toml`):
+4) Configure Codex MCP (`~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.lspi]
@@ -70,12 +55,42 @@ args = ["mcp", "--workspace-root", "."]
 Notes:
 
 - Codex uses a global config; run `codex` from the project root you want to work on.
-- You can pass `--config /path/to/lspi.toml` in `args` if you keep config outside the workspace.
+- If your `lspi` config is not inside the workspace, pass it explicitly:
+  - `args = ["mcp", "--workspace-root", ".", "--config", "/path/to/lspi.toml"]`
 - Optional: add `--warmup` to start language servers eagerly (reduces first-tool-call latency).
 
-## Configuration
+For more details, see `docs/CODEX.md`.
 
-See [`docs/CONFIG.md`](docs/CONFIG.md) for the full schema and discovery order.
+## Language server support
+
+`lspi` does not bundle language servers.
+You install the servers you need and configure them in `lspi` config.
+
+There are two layers of support:
+
+- **First-class server kinds** (built-in defaults / extra compatibility):
+  - Rust: `kind = "rust_analyzer"`
+  - C#: `kind = "omnisharp"`
+  - Python: `kind = "pyright"` / `kind = "basedpyright"`
+- **Generic mode**: for any LSP server that speaks JSON-RPC over stdio, use `kind = "generic"` and set `command`.
+
+In practice, most “standard” language servers work well in generic mode (Go `gopls`, C++ `clangd`, Lua `lua-language-server`, etc.).
+TypeScript/Vue tooling tends to be more quirky; `lspi` includes a small adapter layer for server-specific behavior
+(see `servers[].adapter`, currently `tsserver`).
+
+## Configuration (what you will actually tweak)
+
+Full schema and discovery order:
+
+- `docs/CONFIG.md`
+
+Common knobs (per server):
+
+- `servers[].root_dir` and `servers[].workspace_folders` (multi-root workspaces)
+- `servers[].initialize_options` and `servers[].client_capabilities` (improve compatibility for “generic” servers)
+- `servers[].workspace_configuration` (responses to `workspace/configuration`, e.g. formatting options)
+- `servers[].request_timeout_overrides_ms` (workspace-wide operations can be slow)
+- `servers[].adapter` (server quirks; currently `tsserver`)
 
 Common environment variables:
 
@@ -85,37 +100,51 @@ Common environment variables:
 - `LSPI_PYRIGHT_COMMAND`: override `pyright-langserver` command
 - `LSPI_BASEDPYRIGHT_COMMAND`: override `basedpyright-langserver` command
 
-## Optional: add agent instructions / skill metadata
-
-- Agent prompt snippet (copy-paste): [`docs/AGENTS_SNIPPETS.md`](docs/AGENTS_SNIPPETS.md)
-- Codex skill definition: [`.codex/skills/lspi/SKILL.md`](.codex/skills/lspi/SKILL.md)
-
-## Safety
+## Safety model (rename / edits)
 
 - `rename_symbol` and `rename_symbol_strict` default to preview (`dry_run=true`).
 - To apply edits, pass `dry_run=false`.
 - Optional strict apply: provide `expected_before_sha256` (per-file SHA-256) and enable backups.
+- Writes are restricted to within the configured workspace root(s).
 
-## Optional: smoke tests
+## MCP tools
 
-See [`docs/SMOKE_TEST.md`](docs/SMOKE_TEST.md) for end-to-end scripts (Rust/C#/TypeScript/Go/Python/Lua/C++).
+Read-only navigation:
 
-## Tools (MCP)
-
-- `find_definition`, `find_definition_at`
-- `find_references`, `find_references_at`
 - `hover_at`
-- `find_implementation_at`
-- `find_type_definition_at`
-- `find_incoming_calls`, `find_incoming_calls_at`
-- `find_outgoing_calls`, `find_outgoing_calls_at`
 - `get_document_symbols`
 - `search_workspace_symbols`
-- `rename_symbol`, `rename_symbol_strict`
+- `find_definition` / `find_definition_at`
+- `find_references` / `find_references_at`
+- `find_implementation_at`
+- `find_type_definition_at`
+- `find_incoming_calls` / `find_incoming_calls_at`
+- `find_outgoing_calls` / `find_outgoing_calls_at`
 - `get_diagnostics`
-- `restart_server`, `stop_server`
 
-If you want a "least privilege" toolset (e.g. read-only navigation), use `mcp.tools` allow/exclude in your config. See [`docs/CONFIG.md`](docs/CONFIG.md).
+Write / control:
+
+- `rename_symbol` / `rename_symbol_strict`
+- `restart_server`
+- `stop_server`
+
+If you want a least-privilege toolset (e.g. read-only navigation), use `mcp.tools` allow/exclude in your config.
+
+## Docs
+
+- Codex integration: `docs/CODEX.md`
+- Configuration: `docs/CONFIG.md`
+- Agent prompt snippet (copy-paste): `docs/AGENTS_SNIPPETS.md`
+- Smoke tests: `docs/SMOKE_TEST.md`
+- Release notes: `CHANGELOG.md`
+
+## Acknowledgements / inspiration
+
+`lspi` is inspired by and references ideas from:
+
+- `cclsp` (MCP ↔ LSP bridge): https://github.com/ktnyt/cclsp
+- `serena` (agent tooling + MCP/LSP integration): https://github.com/oraios/serena
+- `rust-analyzer` (Rust language server): https://github.com/rust-lang/rust-analyzer
 
 ## Development
 
@@ -125,20 +154,8 @@ Run MCP server without installing:
 cargo run -p lspi -- mcp --workspace-root .
 ```
 
-Run doctor:
-
-```bash
-cargo run -p lspi -- doctor --workspace-root .
-```
-
-Run tests (recommended):
+Run tests:
 
 ```bash
 cargo nextest run
-```
-
-Format:
-
-```bash
-cargo fmt
 ```
