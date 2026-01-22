@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -54,6 +56,11 @@ pub struct LspServerConfig {
     /// Optional idle shutdown (milliseconds). If set, lspi may stop the server after being idle.
     #[serde(default)]
     pub idle_shutdown_ms: Option<u64>,
+    /// Optional responses for server-initiated `workspace/configuration` requests.
+    /// Keys are the `section` values requested by the server (e.g. `formattingOptions` for TypeScript LS).
+    #[serde(default)]
+    #[serde(alias = "workspaceConfiguration")]
+    pub workspace_configuration: Option<HashMap<String, JsonValue>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +121,7 @@ pub struct ResolvedServerConfig {
     pub warmup_timeout_ms: Option<u64>,
     pub restart_interval_minutes: Option<u64>,
     pub idle_shutdown_ms: Option<u64>,
+    pub workspace_configuration: HashMap<String, JsonValue>,
 }
 
 pub fn load_config(
@@ -318,6 +326,16 @@ fn resolve_server_config(
         warmup_timeout_ms: server.warmup_timeout_ms,
         restart_interval_minutes: server.restart_interval_minutes,
         idle_shutdown_ms: server.idle_shutdown_ms,
+        workspace_configuration: server
+            .workspace_configuration
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let key = k.trim().to_string();
+                if key.is_empty() { None } else { Some((key, v)) }
+            })
+            .collect(),
     }
 }
 
@@ -335,6 +353,7 @@ fn default_rust_analyzer_server(workspace_root: &Path) -> ResolvedServerConfig {
         warmup_timeout_ms: None,
         restart_interval_minutes: None,
         idle_shutdown_ms: None,
+        workspace_configuration: HashMap::new(),
     }
 }
 
@@ -482,6 +501,26 @@ exclude = ["rename_symbol"]
     }
 
     #[test]
+    fn toml_parses_workspace_configuration_map() {
+        let toml = r#"
+[[servers]]
+id = "ts"
+kind = "generic"
+extensions = ["ts"]
+command = "typescript-language-server"
+args = ["--stdio"]
+language_id = "typescript"
+
+[servers.workspace_configuration]
+formattingOptions = { tabSize = 2, insertSpaces = true }
+"#;
+        let config: LspiConfig = toml::from_str(toml).unwrap();
+        let server = config.servers.unwrap().into_iter().next().unwrap();
+        let map = server.workspace_configuration.unwrap();
+        assert!(map.contains_key("formattingOptions"));
+    }
+
+    #[test]
     fn route_server_by_path_prefers_longest_root_dir_match() {
         let root = temp_root("route-longest");
         let nested = root.join("nested");
@@ -501,6 +540,7 @@ exclude = ["rename_symbol"]
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
+                workspace_configuration: HashMap::new(),
             },
             ResolvedServerConfig {
                 id: "nested".to_string(),
@@ -515,6 +555,7 @@ exclude = ["rename_symbol"]
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
+                workspace_configuration: HashMap::new(),
             },
         ];
 
@@ -546,6 +587,7 @@ exclude = ["rename_symbol"]
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
+                workspace_configuration: HashMap::new(),
             },
             ResolvedServerConfig {
                 id: "second".to_string(),
@@ -560,6 +602,7 @@ exclude = ["rename_symbol"]
                 warmup_timeout_ms: None,
                 restart_interval_minutes: None,
                 idle_shutdown_ms: None,
+                workspace_configuration: HashMap::new(),
             },
         ];
 

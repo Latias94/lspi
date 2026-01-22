@@ -16,6 +16,10 @@ This project follows a lightweight variant of "Keep a Changelog". Versions use s
 - MCP tool schemas: add clearer descriptions and default/maximum hints for common parameters (`max_results`, snippet controls).
 - LSP client: reply to common server-initiated requests (`workspace/configuration`, `workspace/workspaceFolders`, etc.) to improve generic LSP compatibility.
 
+### Added
+
+- Server config: `servers[].workspace_configuration` for customizing responses to `workspace/configuration` requests (useful for TypeScript formatting options, etc.).
+
 ## [0.1.0] - 2026-01-22
 
 Initial 0.1.0 milestone of `lspi` (Rust workspace), providing an MCP stdio server that bridges LSP features for AI coding CLIs (starting with Codex).

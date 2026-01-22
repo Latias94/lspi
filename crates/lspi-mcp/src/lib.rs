@@ -1273,6 +1273,7 @@ impl LspiMcpServer {
             initialize_timeout,
             request_timeout,
             warmup_timeout,
+            workspace_configuration: server.workspace_configuration.clone(),
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -1372,6 +1373,7 @@ impl LspiMcpServer {
             initialize_timeout,
             request_timeout,
             warmup_delay,
+            workspace_configuration: server.workspace_configuration.clone(),
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -1471,6 +1473,7 @@ impl LspiMcpServer {
             request_timeout,
             language_id,
             warmup_delay,
+            workspace_configuration: server.workspace_configuration.clone(),
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?;

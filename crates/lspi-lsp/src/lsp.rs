@@ -190,6 +190,7 @@ pub struct LspClientOptions {
     pub cwd: PathBuf,
     pub initialize_timeout: Duration,
     pub request_timeout: Duration,
+    pub workspace_configuration: HashMap<String, Value>,
 }
 
 #[derive(Debug)]
@@ -211,6 +212,7 @@ pub struct LspClient {
     root_uri: String,
     diagnostic_pull_supported: AtomicU8, // 0=unknown, 1=yes, 2=no
     default_request_timeout: Duration,
+    workspace_configuration: Arc<HashMap<String, Value>>,
 }
 
 impl LspClient {
@@ -258,6 +260,7 @@ impl LspClient {
                 .to_string(),
             diagnostic_pull_supported: AtomicU8::new(0),
             default_request_timeout: options.request_timeout,
+            workspace_configuration: Arc::new(options.workspace_configuration),
         };
 
         client.spawn_stdout_reader(stdout);
@@ -595,27 +598,21 @@ impl LspClient {
     }
 
     fn spawn_stdout_reader(&self, stdout: ChildStdout) {
-        let pending = self.state.clone();
-        let server_status_tx = self.server_status_tx.clone();
-        let diagnostics = self.diagnostics.clone();
-        let diagnostics_notify = self.diagnostics_notify.clone();
-        let stdin = self.stdin.clone();
-        let root_uri = self.root_uri.clone();
+        let ctx = LspMessageContext {
+            stdin: self.stdin.clone(),
+            root_uri: self.root_uri.clone(),
+            workspace_configuration: self.workspace_configuration.clone(),
+            state: self.state.clone(),
+            server_status_tx: self.server_status_tx.clone(),
+            diagnostics: self.diagnostics.clone(),
+            diagnostics_notify: self.diagnostics_notify.clone(),
+        };
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
             loop {
                 match read_lsp_message(&mut reader).await {
                     Ok(Some(message)) => {
-                        handle_lsp_message(
-                            message,
-                            stdin.clone(),
-                            root_uri.clone(),
-                            pending.clone(),
-                            &server_status_tx,
-                            diagnostics.clone(),
-                            diagnostics_notify.clone(),
-                        )
-                        .await;
+                        handle_lsp_message(message, &ctx).await;
                     }
                     Ok(None) => break,
                     Err(err) => {
@@ -643,26 +640,21 @@ fn parse_document_diagnostic_report(value: Value) -> Result<Vec<LspDiagnostic>> 
     Ok(diags)
 }
 
-async fn handle_lsp_message(
-    message: Value,
-    stdin: Arc<Mutex<ChildStdin>>,
-    root_uri: String,
-    state: Arc<Mutex<LspState>>,
-    server_status_tx: &watch::Sender<Option<ServerStatus>>,
-    diagnostics: Arc<Mutex<HashMap<String, Vec<LspDiagnostic>>>>,
-    diagnostics_notify: Arc<Notify>,
-) {
+async fn handle_lsp_message(message: Value, ctx: &LspMessageContext) {
     if let Some(method) = message.get("method").and_then(|m| m.as_str()) {
         if let Some(id) = message.get("id").cloned() {
-            if let Some(result) =
-                default_response_for_server_request(method, message.get("params"), &root_uri)
-            {
+            if let Some(result) = default_response_for_server_request(
+                method,
+                message.get("params"),
+                &ctx.root_uri,
+                &ctx.workspace_configuration,
+            ) {
                 let response = serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": id,
                     "result": result,
                 });
-                if let Err(err) = write_message_to(&stdin, &response).await {
+                if let Err(err) = write_message_to(&ctx.stdin, &response).await {
                     warn!("failed to write response for server request {method}: {err:#}");
                 }
             }
@@ -674,7 +666,7 @@ async fn handle_lsp_message(
         {
             match serde_json::from_value::<ServerStatusParams>(params.clone()) {
                 Ok(p) => {
-                    let _ = server_status_tx.send(Some(ServerStatus {
+                    let _ = ctx.server_status_tx.send(Some(ServerStatus {
                         health: p.health,
                         quiescent: p.quiescent,
                         message: p.message,
@@ -688,9 +680,9 @@ async fn handle_lsp_message(
         {
             match serde_json::from_value::<PublishDiagnosticsParams>(params.clone()) {
                 Ok(p) => {
-                    let mut guard = diagnostics.lock().await;
+                    let mut guard = ctx.diagnostics.lock().await;
                     guard.insert(p.uri, p.diagnostics);
-                    diagnostics_notify.notify_waiters();
+                    ctx.diagnostics_notify.notify_waiters();
                 }
                 Err(err) => warn!("failed to parse publishDiagnostics params: {err:#}"),
             }
@@ -706,7 +698,7 @@ async fn handle_lsp_message(
 
     if let Some(id) = id {
         let tx = {
-            let mut guard = state.lock().await;
+            let mut guard = ctx.state.lock().await;
             guard.pending.remove(&id)
         };
         if let Some(tx) = tx {
@@ -715,6 +707,17 @@ async fn handle_lsp_message(
             debug!("received response for unknown id: {id}");
         }
     }
+}
+
+#[derive(Clone)]
+struct LspMessageContext {
+    stdin: Arc<Mutex<ChildStdin>>,
+    root_uri: String,
+    workspace_configuration: Arc<HashMap<String, Value>>,
+    state: Arc<Mutex<LspState>>,
+    server_status_tx: watch::Sender<Option<ServerStatus>>,
+    diagnostics: Arc<Mutex<HashMap<String, Vec<LspDiagnostic>>>>,
+    diagnostics_notify: Arc<Notify>,
 }
 
 async fn write_message_to(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) -> Result<()> {
@@ -731,16 +734,45 @@ fn default_response_for_server_request(
     method: &str,
     params: Option<&Value>,
     root_uri: &str,
+    workspace_configuration: &HashMap<String, Value>,
 ) -> Option<Value> {
     match method {
         // Many servers use workspace/configuration to pull settings. Returning nulls means “use defaults”.
         "workspace/configuration" => {
-            let count = params
+            let Some(items) = params
                 .and_then(|p| p.get("items"))
                 .and_then(|v| v.as_array())
-                .map(|v| v.len())
-                .unwrap_or(0);
-            Some(Value::Array(vec![Value::Null; count]))
+            else {
+                return Some(Value::Array(Vec::new()));
+            };
+
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                let section = item
+                    .get("section")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+
+                if let Some(v) = workspace_configuration.get(section) {
+                    out.push(v.clone());
+                    continue;
+                }
+
+                // typescript-language-server expects formattingOptions via workspace/configuration.
+                // Returning a sensible default improves rename/organize-imports behavior.
+                if section == "formattingOptions" || section.ends_with(".formattingOptions") {
+                    out.push(serde_json::json!({
+                        "tabSize": 4,
+                        "insertSpaces": true
+                    }));
+                    continue;
+                }
+
+                out.push(Value::Null);
+            }
+
+            Some(Value::Array(out))
         }
         "workspace/workspaceFolders" => Some(serde_json::json!([{
             "uri": root_uri,
@@ -884,6 +916,7 @@ mod server_request_tests {
             "workspace/configuration",
             Some(&params),
             "file:///root",
+            &HashMap::new(),
         )
         .unwrap();
         assert_eq!(out, serde_json::json!([null, null]));
@@ -891,9 +924,13 @@ mod server_request_tests {
 
     #[test]
     fn workspace_folders_returns_root_uri() {
-        let out =
-            default_response_for_server_request("workspace/workspaceFolders", None, "file:///root")
-                .unwrap();
+        let out = default_response_for_server_request(
+            "workspace/workspaceFolders",
+            None,
+            "file:///root",
+            &HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(
             out,
             serde_json::json!([{ "uri": "file:///root", "name": "workspace" }])
@@ -903,12 +940,41 @@ mod server_request_tests {
     #[test]
     fn vue_tsserver_request_project_info_returns_minimal_payload() {
         let params = serde_json::json!([42, "_vue:projectInfo", {}]);
-        let out =
-            default_response_for_server_request("tsserver/request", Some(&params), "file:///root")
-                .unwrap();
+        let out = default_response_for_server_request(
+            "tsserver/request",
+            Some(&params),
+            "file:///root",
+            &HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(
             out,
             serde_json::json!([42, { "configFiles": [], "sourceFiles": [] }])
+        );
+    }
+
+    #[test]
+    fn workspace_configuration_uses_config_map_for_formatting_options() {
+        let params = serde_json::json!({
+            "items": [
+                { "section": "formattingOptions" }
+            ]
+        });
+        let mut map = HashMap::new();
+        map.insert(
+            "formattingOptions".to_string(),
+            serde_json::json!({ "tabSize": 2, "insertSpaces": false }),
+        );
+        let out = default_response_for_server_request(
+            "workspace/configuration",
+            Some(&params),
+            "file:///root",
+            &map,
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            serde_json::json!([{ "tabSize": 2, "insertSpaces": false }])
         );
     }
 }

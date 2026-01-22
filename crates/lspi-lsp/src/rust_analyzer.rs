@@ -30,6 +30,7 @@ pub struct RustAnalyzerClientOptions {
     pub initialize_timeout: Duration,
     pub request_timeout: Duration,
     pub warmup_timeout: Duration,
+    pub workspace_configuration: HashMap<String, Value>,
 }
 
 pub async fn resolve_rust_analyzer_command() -> Result<String> {
@@ -93,6 +94,7 @@ impl Default for RustAnalyzerClientOptions {
             initialize_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
             warmup_timeout: Duration::from_secs(5),
+            workspace_configuration: HashMap::new(),
         }
     }
 }
@@ -118,6 +120,7 @@ impl RustAnalyzerClient {
             cwd: options.cwd,
             initialize_timeout: options.initialize_timeout,
             request_timeout: options.request_timeout,
+            workspace_configuration: options.workspace_configuration,
         })
         .await?;
 
