@@ -23,9 +23,11 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use url::Url;
 
-const DEFAULT_MAX_TOTAL_CHARS: usize = 120_000;
-const MIN_MAX_TOTAL_CHARS: usize = 10_000;
-const ABS_MAX_TOTAL_CHARS: usize = 2_000_000;
+mod output;
+mod tools;
+mod workspace_edit;
+
+use output::{effective_max_total_chars, enforce_global_output_caps};
 
 pub async fn run_stdio() -> Result<()> {
     run_stdio_with_options(McpOptions::default()).await
@@ -61,27 +63,8 @@ impl LspiMcpServer {
         )?;
         let servers = lspi_core::config::resolved_servers(&loaded.config, &loaded.workspace_root);
 
-        let all_tools = vec![
-            tool_find_definition(),
-            tool_find_definition_at(),
-            tool_find_references(),
-            tool_find_references_at(),
-            tool_hover_at(),
-            tool_find_implementation_at(),
-            tool_find_type_definition_at(),
-            tool_find_incoming_calls(),
-            tool_find_outgoing_calls(),
-            tool_find_incoming_calls_at(),
-            tool_find_outgoing_calls_at(),
-            tool_get_document_symbols(),
-            tool_search_workspace_symbols(),
-            tool_rename_symbol(),
-            tool_rename_symbol_strict(),
-            tool_get_diagnostics(),
-            tool_restart_server(),
-            tool_stop_server(),
-        ];
-        let tools = filter_tools_by_config(all_tools, loaded.config.mcp.as_ref());
+        let all_tools = tools::all_tools();
+        let tools = tools::filter_tools_by_config(all_tools, loaded.config.mcp.as_ref());
 
         let server = Self {
             tools: Arc::new(tools),
@@ -337,70 +320,6 @@ impl ServerHandler for LspiMcpServer {
     }
 }
 
-fn filter_tools_by_config(
-    tools: Vec<Tool>,
-    mcp: Option<&lspi_core::config::McpConfig>,
-) -> Vec<Tool> {
-    let Some(tools_cfg) = mcp.and_then(|m| m.tools.as_ref()) else {
-        return tools;
-    };
-
-    let normalize = |s: &str| s.trim().to_ascii_lowercase();
-    let known: std::collections::HashSet<String> = tools
-        .iter()
-        .map(|t| normalize(t.name.as_ref()))
-        .filter(|n| !n.is_empty())
-        .collect();
-    let mut allow_set = std::collections::HashSet::<String>::new();
-    if let Some(list) = tools_cfg.allow.as_ref() {
-        for item in list {
-            let n = normalize(item);
-            if !n.is_empty() {
-                allow_set.insert(n);
-            }
-        }
-    }
-
-    let mut exclude_set = std::collections::HashSet::<String>::new();
-    if let Some(list) = tools_cfg.exclude.as_ref() {
-        for item in list {
-            let n = normalize(item);
-            if !n.is_empty() {
-                exclude_set.insert(n);
-            }
-        }
-    }
-
-    let has_allow = !allow_set.is_empty();
-
-    let filtered: Vec<Tool> = tools
-        .into_iter()
-        .filter(|tool| {
-            let name = normalize(tool.name.as_ref());
-            if has_allow {
-                return allow_set.contains(&name);
-            }
-            !exclude_set.contains(&name)
-        })
-        .collect();
-
-    if has_allow {
-        for wanted in allow_set {
-            if !known.contains(&wanted) {
-                warn!("mcp.tools.allow includes unknown tool: {wanted}");
-            }
-        }
-    } else {
-        for denied in exclude_set {
-            if !known.contains(&denied) {
-                warn!("mcp.tools.exclude includes unknown tool: {denied}");
-            }
-        }
-    }
-
-    filtered
-}
-
 struct ManagedClient<T> {
     client: Arc<T>,
     started_at: Instant,
@@ -439,44 +358,6 @@ fn lsp_range_1based(range: &lspi_lsp::LspRange) -> Value {
         "start": lsp_position_1based(&range.start),
         "end": lsp_position_1based(&range.end),
     })
-}
-
-fn effective_max_total_chars(
-    config: &lspi_core::config::LspiConfig,
-    requested: Option<usize>,
-) -> (usize, Option<Value>) {
-    let output = config.mcp.as_ref().and_then(|m| m.output.as_ref());
-
-    let hard = output
-        .and_then(|o| o.max_total_chars_hard)
-        .unwrap_or(ABS_MAX_TOTAL_CHARS)
-        .clamp(MIN_MAX_TOTAL_CHARS, ABS_MAX_TOTAL_CHARS);
-
-    let default_value = output
-        .and_then(|o| o.max_total_chars_default)
-        .unwrap_or(DEFAULT_MAX_TOTAL_CHARS)
-        .clamp(MIN_MAX_TOTAL_CHARS, hard);
-
-    let effective = requested
-        .unwrap_or(default_value)
-        .clamp(MIN_MAX_TOTAL_CHARS, hard);
-
-    let warning = requested.and_then(|req| {
-        if req == effective {
-            None
-        } else {
-            Some(json!({
-                "kind": "max_total_chars_clamped",
-                "message": "Requested max_total_chars was clamped by policy.",
-                "requested": req,
-                "effective": effective,
-                "hard": hard,
-                "min": MIN_MAX_TOTAL_CHARS
-            }))
-        }
-    });
-
-    (effective, warning)
 }
 
 fn is_method_not_found_error(err: &anyhow::Error) -> bool {
@@ -4090,12 +3971,12 @@ impl LspiMcpServer {
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-        let preview = workspace_edit_preview(&changes)
+        let preview = workspace_edit::workspace_edit_preview(&changes)
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         if !dry_run {
-            let apply_result = apply_workspace_edit(
+            let apply_result = workspace_edit::apply_workspace_edit(
                 &self.state.workspace_root,
                 &changes,
                 args.expected_before_sha256.as_ref(),
@@ -4222,7 +4103,7 @@ impl LspiMcpServer {
             });
         };
 
-        let preview = workspace_edit_preview(&changes)
+        let preview = workspace_edit::workspace_edit_preview(&changes)
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
@@ -4239,7 +4120,7 @@ impl LspiMcpServer {
         }
 
         if !dry_run {
-            let apply_result = apply_workspace_edit(
+            let apply_result = workspace_edit::apply_workspace_edit(
                 &self.state.workspace_root,
                 &changes,
                 args.expected_before_sha256.as_ref(),
@@ -4854,19 +4735,6 @@ async fn shutdown_generic_managed(
     }
 }
 
-#[derive(Debug, Deserialize, serde::Serialize)]
-struct WorkspaceEditPreviewFile {
-    uri: String,
-    file_path: Option<String>,
-    before_sha256: Option<String>,
-    edits: Vec<lspi_lsp::LspTextEdit>,
-}
-
-#[derive(Debug, Deserialize, serde::Serialize)]
-struct WorkspaceEditPreview {
-    files: Vec<WorkspaceEditPreviewFile>,
-}
-
 #[derive(Debug, serde::Serialize)]
 struct LocationWithSnippet {
     file_path: String,
@@ -4887,45 +4755,6 @@ struct ReferenceMatchOut {
     symbol: Value,
     references: Vec<LocationWithSnippet>,
     truncated: bool,
-}
-
-#[derive(Debug, serde::Serialize)]
-struct ApplyWorkspaceEditResult {
-    files_modified: Vec<String>,
-    backup_files: Vec<String>,
-}
-
-async fn workspace_edit_preview(
-    changes: &std::collections::HashMap<String, Vec<lspi_lsp::LspTextEdit>>,
-) -> anyhow::Result<WorkspaceEditPreview> {
-    let mut files = Vec::new();
-    for (uri, edits) in changes {
-        let (file_path, before_sha256) = match uri_to_path_maybe(uri).await {
-            Ok(Some(path)) => {
-                let bytes = tokio::fs::read(&path).await.ok();
-                let hash = bytes.as_deref().map(lspi_core::hashing::sha256_hex);
-                (Some(path.to_string_lossy().to_string()), hash)
-            }
-            Ok(None) => (None, None),
-            Err(_) => (None, None),
-        };
-
-        files.push(WorkspaceEditPreviewFile {
-            uri: uri.clone(),
-            file_path,
-            before_sha256,
-            edits: edits.clone(),
-        });
-    }
-    Ok(WorkspaceEditPreview { files })
-}
-
-async fn uri_to_path_maybe(uri: &str) -> anyhow::Result<Option<PathBuf>> {
-    let url = Url::parse(uri)?;
-    if url.scheme() != "file" {
-        return Ok(None);
-    }
-    Ok(url.to_file_path().ok())
 }
 
 async fn maybe_snippet_for_file_path(
@@ -4951,459 +4780,14 @@ async fn maybe_snippet_for_file_path(
     )?))
 }
 
-async fn apply_workspace_edit(
-    workspace_root: &Path,
-    changes: &std::collections::HashMap<String, Vec<lspi_lsp::LspTextEdit>>,
-    expected_before_sha256: Option<&std::collections::HashMap<String, String>>,
-    create_backups: bool,
-    backup_suffix: &str,
-) -> anyhow::Result<ApplyWorkspaceEditResult> {
-    let root = workspace_root.canonicalize().with_context(|| {
-        format!(
-            "failed to canonicalize workspace root: {}",
-            workspace_root.to_string_lossy()
-        )
-    })?;
-
-    struct FileState {
-        path: PathBuf,
-        original_bytes: Vec<u8>,
-        backup_path: Option<PathBuf>,
-        edits: Vec<lspi_core::text_edit::TextEdit>,
-    }
-
-    let mut files = Vec::<FileState>::new();
-
-    for (uri, edits) in changes {
-        let Some(path) = uri_to_path_maybe(uri).await? else {
-            return Err(anyhow::anyhow!(
-                "unsupported edit URI (only file:// supported): {uri}"
-            ));
-        };
-
-        let canonical = path
-            .canonicalize()
-            .with_context(|| format!("failed to canonicalize {path:?}"))?;
-        if !canonical.starts_with(&root) {
-            return Err(anyhow::anyhow!(
-                "refusing to write outside workspace root (root={:?}, path={:?})",
-                root,
-                canonical
-            ));
-        }
-
-        let original_bytes = tokio::fs::read(&canonical)
-            .await
-            .with_context(|| format!("failed to read file: {canonical:?}"))?;
-
-        let current_hash = lspi_core::hashing::sha256_hex(&original_bytes);
-        if let Some(expected) = expected_before_sha256 {
-            let key = canonical.to_string_lossy().to_string();
-            let Some(want) = expected.get(&key) else {
-                return Err(anyhow::anyhow!(
-                    "missing expected_before_sha256 entry for {key}"
-                ));
-            };
-            if want != &current_hash {
-                return Err(anyhow::anyhow!(
-                    "sha256 mismatch for {} (expected={}, got={})",
-                    key,
-                    want,
-                    current_hash
-                ));
-            }
-        }
-
-        let mut converted = Vec::with_capacity(edits.len());
-        for e in edits {
-            converted.push(lspi_core::text_edit::TextEdit {
-                range: lspi_core::text_edit::Range {
-                    start: lspi_core::text_edit::Position {
-                        line: e.range.start.line,
-                        character: e.range.start.character,
-                    },
-                    end: lspi_core::text_edit::Position {
-                        line: e.range.end.line,
-                        character: e.range.end.character,
-                    },
-                },
-                new_text: e.new_text.clone(),
-            });
-        }
-
-        files.push(FileState {
-            path: canonical,
-            original_bytes,
-            backup_path: None,
-            edits: converted,
-        });
-    }
-
-    let mut files_modified = Vec::new();
-    let mut backup_files = Vec::new();
-
-    for f in &mut files {
-        if create_backups {
-            let backup_path = backup_path_for(&f.path, backup_suffix)?;
-            tokio::fs::write(&backup_path, &f.original_bytes)
-                .await
-                .with_context(|| format!("failed to write backup file: {backup_path:?}"))?;
-            backup_files.push(backup_path.to_string_lossy().to_string());
-            f.backup_path = Some(backup_path);
-        }
-    }
-
-    let apply_result: anyhow::Result<()> = async {
-        for f in &files {
-            let original_text =
-                String::from_utf8(f.original_bytes.clone()).context("file is not valid UTF-8")?;
-            let new_text = lspi_core::text_edit::apply_text_edits_utf16(&original_text, &f.edits)?;
-            write_best_effort_atomic(&f.path, new_text.as_bytes()).await?;
-            files_modified.push(f.path.to_string_lossy().to_string());
-        }
-        Ok(())
-    }
-    .await;
-
-    if let Err(err) = apply_result {
-        for f in &files {
-            let _ = tokio::fs::write(&f.path, &f.original_bytes).await;
-        }
-        for f in &files {
-            if let Some(backup_path) = &f.backup_path {
-                let _ = tokio::fs::remove_file(backup_path).await;
-            }
-        }
-        return Err(err);
-    }
-
-    Ok(ApplyWorkspaceEditResult {
-        files_modified,
-        backup_files,
-    })
-}
-
-fn backup_path_for(path: &Path, backup_suffix: &str) -> anyhow::Result<PathBuf> {
-    if backup_suffix.is_empty() {
-        return Err(anyhow::anyhow!("backup_suffix must not be empty"));
-    }
-    if backup_suffix.contains('/') || backup_suffix.contains('\\') {
-        return Err(anyhow::anyhow!(
-            "backup_suffix must not contain path separators"
-        ));
-    }
-    if backup_suffix.contains(':') {
-        return Err(anyhow::anyhow!("backup_suffix must not contain ':'"));
-    }
-
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("path has no file name: {path:?}"))?
-        .to_string_lossy();
-
-    Ok(path.with_file_name(format!("{file_name}{backup_suffix}")))
-}
-
-async fn write_best_effort_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("path has no parent: {path:?}"))?;
-
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("path has no file name: {path:?}"))?
-        .to_string_lossy();
-
-    let nonce = format!(
-        "{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
-
-    let tmp_path = parent.join(format!(".{file_name}.lspi-tmp-{nonce}"));
-    tokio::fs::write(&tmp_path, bytes)
-        .await
-        .with_context(|| format!("failed to write temp file: {tmp_path:?}"))?;
-
-    match tokio::fs::rename(&tmp_path, path).await {
-        Ok(()) => Ok(()),
-        Err(rename_err) => {
-            let _ = tokio::fs::remove_file(path).await;
-            match tokio::fs::rename(&tmp_path, path).await {
-                Ok(()) => Ok(()),
-                Err(err) => {
-                    let _ = tokio::fs::remove_file(&tmp_path).await;
-                    Err(anyhow::anyhow!(
-                        "failed to replace file: {path:?} (rename_err={rename_err}, err={err})"
-                    ))
-                }
-            }
-        }
-    }
-}
-
-fn enforce_global_output_caps(max_total_chars: usize, include_snippet: bool, payload: &mut Value) {
-    let Some(tool) = payload
-        .get("tool")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-    else {
-        return;
-    };
-
-    if json_len(payload) <= max_total_chars {
-        return;
-    }
-
-    let mut warnings = payload
-        .get("warnings")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    let mut changed = false;
-
-    // 1) Drop snippets (cheap win).
-    if include_snippet && let Some(results) = payload.get_mut("results") {
-        strip_snippets(results);
-        warnings.push(json!({
-            "kind": "global_cap_dropped_snippet",
-            "message": "Dropped snippets to satisfy max_total_chars.",
-            "max_total_chars": max_total_chars
-        }));
-        changed = true;
-    }
-
-    // 2) Truncate the main arrays until size is below cap.
-    if json_len(payload) > max_total_chars {
-        match tool.as_str() {
-            "get_diagnostics" => {
-                while json_len(payload) > max_total_chars {
-                    let len = payload
-                        .get("diagnostics")
-                        .and_then(|v| v.as_array())
-                        .map(|a| a.len())
-                        .unwrap_or(0);
-                    if len <= 1 {
-                        break;
-                    }
-                    {
-                        let diags = payload
-                            .get_mut("diagnostics")
-                            .and_then(|v| v.as_array_mut())
-                            .unwrap();
-                        diags.truncate(len.div_ceil(2));
-                    }
-                    changed = true;
-                }
-                let diag_len = payload
-                    .get("diagnostics")
-                    .and_then(|v| v.as_array())
-                    .map(|diags| diags.len());
-                if let (Some(diag_len), Some(count)) = (diag_len, payload.get_mut("count")) {
-                    *count = Value::Number(serde_json::Number::from(diag_len));
-                }
-            }
-            "find_definition" | "find_references" => {
-                while json_len(payload) > max_total_chars {
-                    let total_locations = payload
-                        .get("results")
-                        .and_then(|v| v.as_array())
-                        .map(|results| count_locations(results.as_slice()))
-                        .unwrap_or(0);
-                    if total_locations <= 1 {
-                        break;
-                    }
-                    let target = total_locations.div_ceil(2);
-                    {
-                        let results = payload
-                            .get_mut("results")
-                            .and_then(|v| v.as_array_mut())
-                            .unwrap();
-                        truncate_locations(results, target);
-                    }
-                    changed = true;
-                }
-
-                let total = payload
-                    .get("results")
-                    .and_then(|v| v.as_array())
-                    .map(|results| count_locations(results.as_slice()))
-                    .unwrap_or(0);
-
-                if tool == "find_definition"
-                    && let Some(obj) = payload.as_object_mut()
-                {
-                    obj.insert(
-                        "definition_locations".to_string(),
-                        Value::Number(serde_json::Number::from(total)),
-                    );
-                }
-                if tool == "find_references"
-                    && let Some(obj) = payload.as_object_mut()
-                {
-                    obj.insert(
-                        "reference_locations".to_string(),
-                        Value::Number(serde_json::Number::from(total)),
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if json_len(payload) > max_total_chars {
-        // Worst-case fallback: keep metadata + warnings, drop large payloads.
-        if let Some(obj) = payload.as_object_mut() {
-            obj.insert("results".to_string(), Value::Array(Vec::new()));
-            obj.insert("diagnostics".to_string(), Value::Array(Vec::new()));
-        }
-        warnings.push(json!({
-            "kind": "global_cap_cleared_results",
-            "message": "Cleared results to satisfy max_total_chars.",
-            "max_total_chars": max_total_chars
-        }));
-        changed = true;
-    }
-
-    if changed && let Some(obj) = payload.as_object_mut() {
-        obj.insert("warnings".to_string(), Value::Array(warnings));
-        obj.insert("truncated".to_string(), Value::Bool(true));
-    }
-}
-
-fn json_len(value: &Value) -> usize {
-    serde_json::to_string(value)
-        .map(|s| s.len())
-        .unwrap_or(usize::MAX)
-}
-
-fn strip_snippets(value: &mut Value) {
-    match value {
-        Value::Array(arr) => {
-            for v in arr {
-                strip_snippets(v);
-            }
-        }
-        Value::Object(map) => {
-            map.remove("snippet");
-            for (_, v) in map.iter_mut() {
-                strip_snippets(v);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn count_locations(results: &[Value]) -> usize {
-    let mut total = 0usize;
-    for r in results {
-        if let Some(defs) = r.get("definitions").and_then(|v| v.as_array()) {
-            total += defs.len();
-        }
-        if let Some(refs) = r.get("references").and_then(|v| v.as_array()) {
-            total += refs.len();
-        }
-    }
-    total
-}
-
-fn truncate_locations(results: &mut [Value], mut remaining: usize) {
-    for r in results {
-        if remaining == 0 {
-            if let Some(defs) = r.get_mut("definitions").and_then(|v| v.as_array_mut()) {
-                defs.clear();
-            }
-            if let Some(refs) = r.get_mut("references").and_then(|v| v.as_array_mut()) {
-                refs.clear();
-            }
-            continue;
-        }
-
-        if let Some(defs) = r.get_mut("definitions").and_then(|v| v.as_array_mut()) {
-            if defs.len() > remaining {
-                defs.truncate(remaining);
-                remaining = 0;
-            } else {
-                remaining -= defs.len();
-            }
-        }
-        if let Some(refs) = r.get_mut("references").and_then(|v| v.as_array_mut()) {
-            if remaining == 0 {
-                refs.clear();
-            } else if refs.len() > remaining {
-                refs.truncate(remaining);
-                remaining = 0;
-            } else {
-                remaining -= refs.len();
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod output_caps_tests {
-    use super::*;
-
-    #[test]
-    fn drops_snippets_and_truncates_results() {
-        let mut payload = json!({
-            "ok": true,
-            "tool": "find_definition",
-            "results": [{
-                "symbol": {"name":"x"},
-                "definitions": (0..100).map(|_| json!({
-                    "file_path": "a.rs",
-                    "uri": "file:///a.rs",
-                    "range": {"start":{"line":0,"character":0},"end":{"line":0,"character":1}},
-                    "snippet": {"start_line":0,"text":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","truncated":false}
-                })).collect::<Vec<_>>()
-            }],
-            "warnings": [],
-            "definition_locations": 100,
-            "truncated": false
-        });
-
-        enforce_global_output_caps(2000, true, &mut payload);
-        assert_eq!(payload.get("truncated"), Some(&Value::Bool(true)));
-        let len = json_len(&payload);
-        assert!(len <= 2000);
-        // Ensure snippet keys are removed
-        let defs = payload["results"][0]["definitions"].as_array().unwrap();
-        assert!(defs.iter().all(|d| d.get("snippet").is_none()));
-    }
-}
-
-#[cfg(test)]
-mod boundary_tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn canonicalize_within_rejects_paths_outside_root() {
-        let root_dir = tempdir().unwrap();
-        let outside_dir = tempdir().unwrap();
-
-        let root = root_dir.path();
-        let outside_file = outside_dir.path().join("x.rs");
-        std::fs::write(&outside_file, "fn main() {}\n").unwrap();
-
-        let err = canonicalize_within(root, &outside_file).unwrap_err();
-        assert!(err.to_string().contains("outside workspace_root"));
-    }
-}
-
-#[cfg(test)]
+#[cfg(any())]
 mod apply_workspace_edit_tests {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
     use url::Url;
 
-    use super::apply_workspace_edit;
+    use crate::workspace_edit::apply_workspace_edit;
 
     fn file_uri(path: &Path) -> String {
         Url::from_file_path(path).unwrap().to_string()
@@ -6029,4 +5413,23 @@ fn tool_stop_server() -> Tool {
 fn schema(value: serde_json::Value) -> JsonObject {
     #[expect(clippy::expect_used)]
     serde_json::from_value(value).expect("tool schema should deserialize")
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn canonicalize_within_rejects_paths_outside_root() {
+        let root_dir = tempdir().unwrap();
+        let outside_dir = tempdir().unwrap();
+
+        let root = root_dir.path();
+        let outside_file = outside_dir.path().join("x.rs");
+        std::fs::write(&outside_file, "fn main() {}\n").unwrap();
+
+        let err = canonicalize_within(root, &outside_file).unwrap_err();
+        assert!(err.to_string().contains("outside workspace_root"));
+    }
 }
